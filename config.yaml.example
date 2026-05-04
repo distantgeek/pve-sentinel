@@ -1,0 +1,99 @@
+# pve-sentinel configuration
+# Copy to config.yaml and customize
+
+# ── Model ──────────────────────────────────────────────────
+model:
+  # Provider: opencode-go, openai, anthropic, ollama, or custom
+  provider: opencode-go
+  
+  # Model ID (GLM-5.1 strongly recommended for advisory tasks)
+  model_id: glm-5.1
+  
+  # For non-OpenCode providers, uncomment:
+  # api_base: https://api.openai.com/v1
+  # api_key_env: OPENAI_API_KEY
+
+# ── OpenCode Server ────────────────────────────────────────
+opencode:
+  host: "127.0.0.1"
+  port: 4096
+  password_env: SENTINEL_OPENCODE_PASSWORD
+
+# ── Proxmox ────────────────────────────────────────────────
+proxmox:
+  host: "192.168.x.x"           # Proxmox host IP
+  user: "username@pam"          # API user (realm must match token realm)
+  token_name: "your-token"      # API token name
+  # Token value from environment variable (never hardcoded)
+  token_value_env: PROXMOX_TOKEN_VALUE
+  node: ""                      # auto-detected if blank
+  verify_ssl: false
+
+# ── CVE Scanner ────────────────────────────────────────────
+cve:
+  # Data sources
+  nvd_api_enabled: true
+  mitre_api_enabled: true
+  exploitdb_enabled: true
+  pve_security_enabled: true
+  
+  # Schedule (systemd timers override these)
+  scan_schedule: "daily"       # daily | weekly
+  scan_hour: 6
+  digest_schedule: "weekly"    # weekly | never
+  digest_day: "monday"
+  
+  # NVD API rate limiting (requests per 6 seconds)
+  nvd_rate_limit: 5
+  
+  # Exploit-DB reference
+  exploitdb_base_url: "https://exploit-db.com"
+  
+# ── Guest Scanning ─────────────────────────────────────────
+guests:
+  # VM scanning requires QEMU Guest Agent
+  vm_scanning: false           # opt-in
+  vm_scan_timeout: 30          # seconds per VM
+  vm_scan_parallel: 3          # max concurrent VM scans
+  
+  # LXC scanning uses pct exec (always available)
+  lxc_scanning: true           # on by default
+  
+  # Guest types to skip (comma-separated VMIDs/LXC IDs)
+  exclude: []
+
+# ── Permission Gates ───────────────────────────────────────
+permissions:
+  # Read operations: auto-approved (always)
+  # Write operations: require "confirm"
+  # Destructive operations: require "CONFIRM-<random>"
+  
+  # Proxmox API token permissions (must match Proxmox ACL)
+  allowed_write_actions:
+    - "start"
+    - "stop"
+    - "reset"
+    - "shutdown"
+    - "reboot"
+    - "suspend"
+    - "resume"
+  
+  # Never allow these (even with confirmation)
+  deny_always:
+    - "destroy"
+    - "remove"
+    - "unlink"
+
+# ── Storage ─────────────────────────────────────────────────
+storage:
+  db_path: "sentinel.db"        # SQLite database path
+  digest_dir: "./digests"       # CVE digest output directory
+  log_dir: "./logs"             # Application logs
+  max_digest_age: 90            # days to keep digests
+
+# ── External Scanner Bridge ─────────────────────────────────
+# Optional: correlate findings with an external vulnerability scanner
+external_scanner:
+  enabled: false
+  # type: openvas
+  # api_url: https://openvas.lan:9390

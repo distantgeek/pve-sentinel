@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenCode Server (GLM-5.1 via OpenCode Go)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%u
+ExecStart=%h/.local/bin/opencode serve --port 4096 --hostname 127.0.0.1
+Environment=OPENCODE_SERVER_PASSWORD=%{SENTINEL_OPENCODE_PASSWORD}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

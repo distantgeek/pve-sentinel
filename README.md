@@ -57,7 +57,7 @@ ssh sentinel@<lxc-ip>
 ## Architecture
 
 ```
-LXC: pve-sentinel (Debian 12, 4C/8GB/32GB)
+LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
   ├── opencode serve       → GLM-5.1 via OpenCode Go
   ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
   ├── SQLite               → CVE database, package inventory

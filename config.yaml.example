@@ -13,11 +13,20 @@ model:
   # api_base: https://api.openai.com/v1
   # api_key_env: OPENAI_API_KEY
 
-# ── OpenCode Server ────────────────────────────────────────
-opencode:
-  host: "127.0.0.1"
-  port: 4096
-  password_env: SENTINEL_OPENCODE_PASSWORD
+# ── Security Guardrails ────────────────────────────────────
+guardrails:
+  # When enabled, every LLM response is constrained to a security framework
+  enabled: true
+  
+  # Select a named preset (mutually exclusive with custom):
+  preset: general           # cis-ubuntu-l1 | cis-ai | nist-cyber-ai | general
+  
+  # Or write a custom system prompt (overrides preset):
+  # custom: |
+  #   You are a Proxmox VE security advisor operating under [framework].
+  #   For every recommendation, reference [specific controls].
+  
+  # Run 'uv run python3 -c "from src.guardrails import list_presets; print(list_presets())"' to see all presets
 
 # ── Proxmox ────────────────────────────────────────────────
 proxmox:

@@ -1,81 +1,80 @@
-"""HTTP client for OpenCode server (GLM-5.1 API gateway).
+"""OpenCode Go client — direct REST API (OpenAI-compatible).
 
-Calls the OpenCode serve REST API to send prompts and receive responses.
-OpenCode handles provider routing (Go → Z.AI → GLM-5.1).
+Calls https://opencode.ai/zen/go/v1/chat/completions directly.
+No opencode serve or CLI needed.
 """
 
+import os
 from typing import Optional
 
 import httpx
 
+OPENCODE_GO_BASE = "https://opencode.ai/zen/go/v1"
+
 
 class OpenCodeClient:
-    """Client for the OpenCode server REST API."""
+    """Direct client for OpenCode Go REST API."""
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 4096,
-        password: str = "",
+        api_key: str = "",
+        model: str = "glm-5.1",
         timeout: float = 120.0,
     ):
-        self.base_url = f"http://{host}:{port}"
-        self.password = password
-        self.timeout = timeout
-        self._session_id: Optional[str] = None
+        self.api_key = api_key or os.environ.get("OPENCODE_GO_API_KEY", "")
+        self.model = model
         self._client = httpx.Client(
+            base_url=OPENCODE_GO_BASE,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
             timeout=httpx.Timeout(timeout),
-            auth=("opencode", password) if password else None,
         )
 
-    def _ensure_session(self) -> str:
-        """Create a session if one doesn't exist."""
-        if self._session_id is None:
-            resp = self._client.post(
-                f"{self.base_url}/session",
-                json={"title": "pve-sentinel"},
-            )
-            resp.raise_for_status()
-            self._session_id = resp.json()["id"]
-        return self._session_id
+    def ask(self, prompt: str, system: str = "") -> str:
+        """Send a prompt to the model and return the response text.
 
-    def ask(self, prompt: str, model_id: str = "glm-5.1") -> str:
-        """Send a prompt to GLM-5.1 and return the response text.
-
-        Args:
-            prompt: The user's query.
-            model_id: Model to use (default: glm-5.1).
-
-        Returns:
-            The model's text response.
-
-        Raises:
-            httpx.HTTPError: On API communication failure.
+        If a guardrail system prompt is configured (via config.yaml),
+        it is automatically prepended. Explicit system parameter overrides.
         """
-        session_id = self._ensure_session()
+        from .guardrails import get_system_prompt
+        import yaml
+        from pathlib import Path
+
+        # Auto-inject security guardrail if configured
+        if not system:
+            config_path = Path("config.yaml")
+            if config_path.exists():
+                cfg = yaml.safe_load(config_path.read_text()) or {}
+                guard = cfg.get("guardrails", {})
+                if guard.get("enabled", True):
+                    preset = guard.get("preset")
+                    custom = guard.get("custom")
+                    system = get_system_prompt(preset=preset, custom=custom)
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
         resp = self._client.post(
-            f"{self.base_url}/session/{session_id}/message",
+            "/chat/completions",
             json={
-                "parts": [{"type": "text", "text": prompt}],
-                "model": {
-                    "providerID": "opencode-go",
-                    "modelID": model_id,
-                },
+                "model": self.model,
+                "messages": messages,
             },
         )
         resp.raise_for_status()
         data = resp.json()
-
-        # Extract text from response parts
-        parts = data.get("parts", [])
-        text_parts = [p["text"] for p in parts if p.get("type") == "text"]
-        return "\n".join(text_parts) if text_parts else str(data)
+        choices = data.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "")
+        return ""
 
     def health_check(self) -> bool:
-        """Check if the OpenCode server is reachable."""
+        """Check if the OpenCode Go API is reachable."""
         try:
-            resp = self._client.get(f"{self.base_url}/global/health")
+            resp = self._client.get("/models")
             return resp.status_code == 200
         except httpx.RequestError:
             return False

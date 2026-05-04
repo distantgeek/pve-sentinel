@@ -6,8 +6,8 @@
 ## Architecture
 
 ```
-LXC (Debian 12, 4C/8GB/32GB)
-├── opencode serve (port 4096) → GLM-5.1 via OpenCode Go
+LXC (Debian 13, 4C/8GB/32GB, unprivileged=1)
+├── OpenCode Go REST API (https://opencode.ai/zen/go/v1)
 ├── Python orchestrator (uv venv, 3.12+)
 │   ├── CLI (rich + prompt_toolkit)  ← SSH entry
 │   ├── CVE scanner (NVD + MITRE + ExploitDB + PVE-SA)
@@ -21,7 +21,7 @@ LXC (Debian 12, 4C/8GB/32GB)
 
 | # | Phase | Status |
 |---|-------|--------|
-| 1 | Provision LXC + base tooling | pending |
+| 1 | Provision LXC + base tooling | complete |
 | 2 | OpenCode serve + GLM-5.1 integration | pending |
 | 3 | Core CLI + Proxmox read queries | pending |
 | 4 | Permission gates for write ops | pending |

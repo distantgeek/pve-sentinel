@@ -1,0 +1,307 @@
+# NIST Cybersecurity Framework Profile for AI (Cyber AI Profile)
+# Source: NIST IR 8596 iprd (Initial Preliminary Draft, December 2025)
+# https://doi.org/10.6028/NIST.IR.8596.iprd
+#
+# This file provides authoritative CSF 2.0 control structure + AI-specific 
+# considerations for use as guardrail reference data in pve-sentinel.
+# Full control definitions: https://csrc.nist.gov/pubs/ir/8596/iprd
+
+meta:
+  title: "NIST CSF Profile for AI (Cyber AI Profile)"
+  version: "Initial Preliminary Draft"
+  date: "2025-12"
+  doi: "10.6028/NIST.IR.8596.iprd"
+
+focus_areas:
+  secure:
+    name: "Securing AI System Components"
+    description: "Identifying cybersecurity challenges when integrating AI into organizational ecosystems and infrastructure."
+  defend:
+    name: "Conducting AI-Enabled Cyber Defense" 
+    description: "Identifying opportunities to use AI in supporting and enhancing cybersecurity capabilities."
+  thwart:
+    name: "Thwarting AI-Enabled Cyber Attacks"
+    description: "Building resilience to protect against adversarial uses of AI."
+
+functions:
+  govern:
+    id: GV
+    name: GOVERN
+    description: "The organization's cybersecurity risk management strategy, expectations, and policy are established, communicated, and monitored."
+    categories:
+      organizational_context:
+        id: GV.OC
+        name: "Organizational Context"
+        description: "The circumstances—mission, stakeholder expectations, dependencies, and legal, regulatory, and contractual requirements—surrounding the organization's cybersecurity risk management decisions are understood."
+        ai_considerations: "AI systems introduce new stakeholder expectations around model transparency, bias, and accountability. Organizations must account for AI-specific regulatory requirements in risk management decisions."
+        subcategories:
+          - {id: GV.OC-01, name: "Mission understood and informs cybersecurity risk management"}
+          - {id: GV.OC-02, name: "Internal and external stakeholders are identified and understood"}
+          - {id: GV.OC-03, name: "Legal, regulatory, and contractual requirements are understood"}
+          - {id: GV.OC-04, name: "Critical objectives and capabilities are understood"}
+          - {id: GV.OC-05, name: "Outcomes, capabilities, and services are determined and communicated"}
+      risk_management:
+        id: GV.RM
+        name: "Risk Management Strategy"
+        description: "The organization's priorities, constraints, risk tolerance, and assumptions are established to support operational risk decisions."
+        ai_considerations: "AI risks include model poisoning, data leakage, inference attacks, and supply chain compromise. Risk tolerance must account for AI's probabilistic nature and emergent behaviors."
+        subcategories:
+          - {id: GV.RM-01, name: "Risk management objectives are established"}
+          - {id: GV.RM-02, name: "Risk appetite and tolerance are determined and communicated"}
+          - {id: GV.RM-03, name: "Risk assessments are conducted and maintained"}
+          - {id: GV.RM-04, name: "Strategic opportunities and threats are identified and managed"}
+      roles_and_responsibilities:
+        id: GV.RR
+        name: "Roles, Responsibilities, and Authorities"
+        description: "Cybersecurity roles, responsibilities, and authorities are established and communicated."
+        ai_considerations: "AI governance requires cross-functional roles spanning data science, ML engineering, security, legal, and compliance."
+        subcategories:
+          - {id: GV.RR-01, name: "Cybersecurity roles and responsibilities are established"}
+          - {id: GV.RR-02, name: "Cybersecurity roles and responsibilities are communicated"}
+          - {id: GV.RR-03, name: "Adequate resources are allocated"}
+          - {id: GV.RR-04, name: "Cybersecurity is included in human resources practices"}
+      policy:
+        id: GV.PO
+        name: "Policy"
+        description: "Organizational cybersecurity policy is established, communicated, and enforced."
+        ai_considerations: "AI-specific policies should cover model governance, training data provenance, inference access controls, and acceptable use of AI-enabled tools."
+        subcategories:
+          - {id: GV.PO-01, name: "Policy for managing cybersecurity risks is established"}
+          - {id: GV.PO-02, name: "Policy for managing cybersecurity risks is communicated and enforced"}
+      oversight:
+        id: GV.OV
+        name: "Oversight"
+        description: "Results of organization-wide cybersecurity risk management activities are used to inform, improve, and adjust the strategy."
+        ai_considerations: "Oversight of AI systems requires monitoring for model drift, bias emergence, and adversarial inputs over the system lifecycle."
+        subcategories:
+          - {id: GV.OV-01, name: "Cybersecurity risk management outcomes are reviewed"}
+          - {id: GV.OV-02, name: "Cybersecurity strategy is adjusted based on outcomes"}
+      supply_chain:
+        id: GV.SC
+        name: "Cybersecurity Supply Chain Risk Management"
+        description: "Cyber supply chain risk management processes are identified, established, managed, monitored, and improved."
+        ai_considerations: "AI supply chain risks include model provenance, third-party training data, pre-trained model backdoors, and dependency on external inference APIs. AI Bill of Materials (AIBOM) should track model lineage."
+        subcategories:
+          - {id: GV.SC-01, name: "Supply chain risk management program is established"}
+          - {id: GV.SC-02, name: "Cybersecurity roles in supply chain risk management are identified"}
+          - {id: GV.SC-03, name: "Cybersecurity supply chain risk management is integrated into contracts"}
+          - {id: GV.SC-04, name: "Suppliers are assessed and monitored"}
+          - {id: GV.SC-05, name: "Response and recovery planning includes supply chain"}
+          - {id: GV.SC-06, name: "Supply chain security practices are continuously improved"}
+
+  identify:
+    id: ID
+    name: IDENTIFY
+    description: "The organization's current cybersecurity risks are understood."
+    categories:
+      asset_management:
+        id: ID.AM
+        name: "Asset Management"
+        description: "Assets that enable the organization to achieve business purposes are identified and managed."
+        ai_considerations: "AI assets include models, training data, inference pipelines, feature stores, and model registries. These must be inventoried alongside traditional IT assets."
+        subcategories:
+          - {id: ID.AM-01, name: "Physical and logical assets are inventoried"}
+          - {id: ID.AM-02, name: "Software assets are inventoried"}
+          - {id: ID.AM-03, name: "Data assets are inventoried and classified"}
+          - {id: ID.AM-04, name: "External information systems and services are catalogued"}
+          - {id: ID.AM-05, name: "Assets are prioritized based on classification and criticality"}
+      risk_assessment:
+        id: ID.RA
+        name: "Risk Assessment"
+        description: "The organization understands the cybersecurity risk to operations, assets, and individuals."
+        ai_considerations: "AI risk assessment must include adversarial ML threats (evasion, poisoning, extraction, inversion), model reliability risks, and AI supply chain vulnerabilities."
+        subcategories:
+          - {id: ID.RA-01, name: "Vulnerabilities in assets are identified and documented"}
+          - {id: ID.RA-02, name: "Cyber threat intelligence is received and analyzed"}
+          - {id: ID.RA-03, name: "Internal and external threats are identified and documented"}
+          - {id: ID.RA-04, name: "Potential impacts and likelihoods are identified"}
+          - {id: ID.RA-05, name: "Threats, vulnerabilities, likelihoods, and impacts determine risk"}
+          - {id: ID.RA-06, name: "Risk responses are chosen, prioritized, and planned"}
+          - {id: ID.RA-07, name: "Risk assessment recommendations are communicated"}
+          - {id: ID.RA-08, name: "Risk assessment processes are reviewed and improved"}
+      improvement:
+        id: ID.IM
+        name: "Improvement"
+        description: "Improvements to organizational cybersecurity risk management processes are identified."
+        ai_considerations: "AI system improvements should track model accuracy, false positive rates, and incident response performance metrics over time."
+        subcategories:
+          - {id: ID.IM-01, name: "Improvements are identified from evaluations and assessments"}
+          - {id: ID.IM-02, name: "Improvements are identified from testing and exercises"}
+          - {id: ID.IM-03, name: "Improvements are identified from incident response activities"}
+          - {id: ID.IM-04, name: "Improvement activities are managed and communicated"}
+
+  protect:
+    id: PR
+    name: PROTECT
+    description: "Safeguards to manage cybersecurity risks are used."
+    categories:
+      identity_management:
+        id: PR.AA
+        name: "Identity Management, Authentication, and Access Control"
+        description: "Access to physical and logical assets is limited to authorized users, services, and hardware."
+        ai_considerations: "AI systems require fine-grained access controls for model endpoints, training data access, and inference logging. Service-to-model authentication is critical for API-based AI deployments."
+        subcategories:
+          - {id: PR.AA-01, name: "Identities and credentials are issued, managed, and revoked"}
+          - {id: PR.AA-02, name: "Physical access to assets is managed and protected"}
+          - {id: PR.AA-03, name: "Remote access is managed"}
+          - {id: PR.AA-04, name: "Access permissions are managed and enforced"}
+          - {id: PR.AA-05, name: "Network integrity is protected"}
+      awareness_training:
+        id: PR.AT
+        name: "Awareness and Training"
+        description: "The organization's personnel are provided cybersecurity awareness and training."
+        ai_considerations: "Training should cover AI-specific threats: prompt injection, model poisoning, adversarial inputs, deepfake recognition, and safe AI tool usage practices."
+        subcategories:
+          - {id: PR.AT-01, name: "Cybersecurity awareness training is provided"}
+          - {id: PR.AT-02, name: "Role-based cybersecurity training is provided"}
+      data_security:
+        id: PR.DS
+        name: "Data Security"
+        description: "Data is managed consistent with the organization's risk strategy to protect confidentiality, integrity, and availability."
+        ai_considerations: "Training data integrity, model parameter confidentiality, inference data protection, and dataset versioning are critical. Differential privacy techniques should be applied where applicable."
+        subcategories:
+          - {id: PR.DS-01, name: "Data at rest is protected"}
+          - {id: PR.DS-02, name: "Data in transit is protected"}
+          - {id: PR.DS-10, name: "Data is managed throughout its lifecycle"}
+          - {id: PR.DS-11, name: "Data backups are created and maintained"}
+      platform_security:
+        id: PR.PS
+        name: "Platform Security"
+        description: "The organization's platforms are managed consistent with risk strategy."
+        ai_considerations: "AI platform security includes container isolation for model serving, GPU resource access controls, model registry hardening, and MLOps pipeline security."
+        subcategories:
+          - {id: PR.PS-01, name: "Configuration management practices are established and applied"}
+          - {id: PR.PS-02, name: "Software is maintained and updated"}
+          - {id: PR.PS-03, name: "System security engineering principles are applied"}
+          - {id: PR.PS-04, name: "Log records are generated and made available"}
+          - {id: PR.PS-05, name: "Installation and execution of unauthorized software are prevented"}
+          - {id: PR.PS-06, name: "Secure software development practices are integrated"}
+      technology_infrastructure:
+        id: PR.IR
+        name: "Technology Infrastructure Resilience"
+        description: "Security architectures are managed with the organization's risk strategy."
+        ai_considerations: "Resilience for AI workloads includes GPU failover, model serving redundancy, and protection against resource exhaustion attacks on inference endpoints."
+        subcategories:
+          - {id: PR.IR-01, name: "Networks and environments are segmented and protected"}
+          - {id: PR.IR-02, name: "Resiliency requirements for critical services are established"}
+          - {id: PR.IR-03, name: "Capacity management is performed"}
+          - {id: PR.IR-04, name: "Adequate resource capacity to maintain availability is ensured"}
+
+  detect:
+    id: DE
+    name: DETECT
+    description: "Possible cybersecurity attacks and compromises are found and analyzed."
+    categories:
+      continuous_monitoring:
+        id: DE.CM
+        name: "Continuous Monitoring"
+        description: "Assets are monitored to find anomalies, indicators of compromise, and other potentially adverse events."
+        ai_considerations: "AI systems require monitoring for adversarial inputs, model drift, unexpected outputs, inference anomalies, and GPU resource anomalies. Anomaly detection should account for AI's probabilistic nature."
+        subcategories:
+          - {id: DE.CM-01, name: "Networks and services are monitored"}
+          - {id: DE.CM-02, name: "Physical environment is monitored"}
+          - {id: DE.CM-03, name: "Personnel activity is monitored"}
+          - {id: DE.CM-04, name: "Unauthorized access and use are detected"}
+          - {id: DE.CM-05, name: "Malicious code and unauthorized mobile code are detected"}
+          - {id: DE.CM-06, name: "External service provider activities are monitored"}
+          - {id: DE.CM-07, name: "Cybersecurity testing and exercises are conducted"}
+          - {id: DE.CM-08, name: "Vulnerability scans are performed"}
+          - {id: DE.CM-09, name: "Detection technologies are tested and updated"}
+      adverse_event_analysis:
+        id: DE.AE
+        name: "Adverse Event Analysis"
+        description: "Anomalies, indicators of compromise, and other potentially adverse events are analyzed."
+        ai_considerations: "AI-specific adverse events include prompt injection attempts, model extraction probes, adversarial input patterns, and training data poisoning indicators. Analysis tools must handle AI-native attack signatures."
+        subcategories:
+          - {id: DE.AE-02, name: "Potentially adverse events are analyzed to understand the event"}
+          - {id: DE.AE-03, name: "Information from various sources is correlated"}
+          - {id: DE.AE-04, name: "The estimated magnitude and scope of events are determined"}
+          - {id: DE.AE-05, name: "Incident response is initiated when an incident is declared"}
+          - {id: DE.AE-06, name: "Planning for incident response and recovery is verified"}
+          - {id: DE.AE-07, name: "Proactive measures to detect and respond to threats are implemented"}
+          - {id: DE.AE-08, name: "Detection processes and procedures are continuously improved"}
+
+  respond:
+    id: RS
+    name: RESPOND
+    description: "Actions regarding a detected cybersecurity incident are taken."
+    categories:
+      incident_management:
+        id: RS.MA
+        name: "Incident Management"
+        description: "Responses to detected cybersecurity incidents are managed."
+        ai_considerations: "AI incident response requires new procedures: model rollback, training data quarantine, inference endpoint isolation, and coordination with AI service providers. AI incidents may require rapid containment at machine speed."
+        subcategories:
+          - {id: RS.MA-01, name: "Incident response plan is executed"}
+          - {id: RS.MA-02, name: "Incident reports are triaged and validated"}
+          - {id: RS.MA-03, name: "Incidents are categorized and prioritized"}
+          - {id: RS.MA-04, name: "Incidents are escalated or elevated as needed"}
+          - {id: RS.MA-05, name: "Criteria for initiating incident recovery are applied"}
+      incident_analysis:
+        id: RS.AN
+        name: "Incident Analysis"
+        description: "Investigations are conducted to ensure effective response and support forensics and recovery activities."
+        ai_considerations: "AI forensics require new data sources: model logs, inference telemetry, provenance records, and hyperparameter history. Analysis must determine if model compromise occurred."
+        subcategories:
+          - {id: RS.AN-03, name: "Analysis performed to establish what took place and root cause"}
+          - {id: RS.AN-06, name: "Actions during investigation are recorded, integrity preserved"}
+          - {id: RS.AN-07, name: "Incident data and metadata collected, integrity preserved"}
+          - {id: RS.AN-08, name: "Incident magnitude is estimated and validated"}
+      response_communication:
+        id: RS.CO
+        name: "Incident Response Reporting and Communication"
+        description: "Response activities are coordinated with internal and external stakeholders."
+        ai_considerations: "AI incident notification must address model-specific impacts (e.g., compromised model outputs, data leakage through inference). Establish criteria for autonomous vs. human-reviewed notifications."
+        subcategories:
+          - {id: RS.CO-02, name: "Internal and external stakeholders are notified of incidents"}
+          - {id: RS.CO-03, name: "Information shared with designated internal and external stakeholders"}
+      incident_mitigation:
+        id: RS.MI
+        name: "Incident Mitigation"
+        description: "Activities are performed to prevent expansion of an event and mitigate its effects."
+        ai_considerations: "Mitigation includes rapidly disabling compromised AI agent autonomy, reverting to trusted model checkpoints, and isolating affected inference pipelines."
+        subcategories:
+          - {id: RS.MI-01, name: "Incidents are contained"}
+          - {id: RS.MI-02, name: "Incidents are eradicated"}
+
+  recover:
+    id: RC
+    name: RECOVER
+    description: "Assets and operations affected by a cybersecurity incident are restored."
+    categories:
+      recovery_plan:
+        id: RC.RP
+        name: "Incident Recovery Plan Execution"
+        description: "Restoration activities are performed to ensure operational availability of systems and services."
+        ai_considerations: "AI recovery may require model retraining, dataset restoration, rollback to safe checkpoints, and verification that restored models are free of residual poisoning. Recovery complexity depends on attack type and model architecture."
+        subcategories:
+          - {id: RC.RP-01, name: "Recovery portion of incident response plan is executed"}
+          - {id: RC.RP-02, name: "Recovery actions are selected, scoped, prioritized, and performed"}
+          - {id: RC.RP-03, name: "Integrity of backups and restoration assets is verified before use"}
+          - {id: RC.RP-04, name: "Critical mission functions considered to establish post-incident norms"}
+          - {id: RC.RP-05, name: "Integrity of restored assets verified, normal operations confirmed"}
+          - {id: RC.RP-06, name: "End of incident recovery declared, documentation completed"}
+      recovery_communication:
+        id: RC.CO
+        name: "Incident Recovery Communication"
+        description: "Restoration activities are coordinated with internal and external parties."
+        ai_considerations: "Recovery communications should specify restored model version, expected AI defense capability status, and any residual AI system limitations."
+        subcategories:
+          - {id: RC.CO-03, name: "Recovery activities communicated to designated stakeholders"}
+          - {id: RC.CO-04, name: "Public updates on incident recovery shared using approved methods"}
+
+# Key AI-specific informative references from the Profile
+informative_references:
+  nist:
+    - {id: "NIST SP 800-53 Rev 5", description: "Security and Privacy Controls for Information Systems and Organizations"}
+    - {id: "NIST AI 100-1", description: "AI Risk Management Framework (AI RMF 1.0)"}
+    - {id: "NIST AI 100-2e2025", description: "Adversarial ML: Taxonomy and Terminology of Attacks and Mitigations"}
+    - {id: "NIST AI 600-1", description: "AI RMF: Generative AI Profile"}
+    - {id: "NIST SP 800-218A", description: "Secure Software Development Practices for Generative AI"}
+    - {id: "NIST SP 800-207", description: "Zero Trust Architecture"}
+  industry:
+    - {id: "OWASP Top 10 for LLM Applications 2025", description: "Critical vulnerability categories for LLM deployments"}
+    - {id: "OWASP AI Exchange", description: "Global repository of AI security threats and controls"}
+    - {id: "MITRE ATLAS", description: "Adversarial Threat Landscape for AI Systems"}
+    - {id: "Databricks AI Security Framework (DASF) v2.0", description: "Comprehensive AI security control framework"}
+    - {id: "CSA AI Controls Matrix", description: "Cloud Security Alliance AI control framework"}

@@ -24,6 +24,7 @@ infrastructure guidance — with human-in-the-loop permission gating.
   require explicit confirmation; destructive operations require a random token
 - **Security Guardrails** — LLM responses constrained to NIST CSF AI Profile,
   CIS Ubuntu Level 1, or CIS AI Controls Matrix frameworks
+- **Setup Helper** — One-command CA cert installation and connectivity verification
 - **Guest VM Scanning** *(opt-in)* — Vulnerabilities inside VMs via QEMU
   Guest Agent, with multi-method package discovery (dpkg/rpm/apk/flatpak/npm/
   pip/containers)
@@ -40,9 +41,14 @@ uv sync
 cp config.yaml.example config.yaml
 # Edit config.yaml with your Proxmox host details
 
-# Set environment variables
-export OPENCODE_GO_API_KEY="your-key"
-export PROXMOX_TOKEN_VALUE="your-uuid-secret"
+# Create .env file
+cat > .env << EOF
+OPENCODE_GO_API_KEY=your-key-here
+PROXMOX_TOKEN_VALUE=your-uuid-secret-here
+EOF
+
+# Install Proxmox CA certificate (for SSL verification)
+uv run python -m src.setup cert
 
 # Launch the CLI
 uv run python cli.py
@@ -64,6 +70,17 @@ uv run python cli.py
 
 Free-text input is sent directly to the LLM for advisory chat.
 
+## Setup Helper
+
+```bash
+uv run python -m src.setup cert      # Install Proxmox CA cert to trust store
+uv run python -m src.setup verify    # Test Proxmox API + LLM connectivity
+```
+
+The `cert` command fetches the Proxmox root CA certificate via the TLS handshake
+on port 8006 and installs it to the system trust store. If run as a non-root user,
+it displays the exact sudo command needed.
+
 ## Architecture
 
 ```
@@ -71,6 +88,7 @@ LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
 ├── OpenCode Go REST API → GLM-5.1 (direct HTTPS, no local server)
 ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
 ├── SQLite               → CVE database, package inventory (12 tables)
+├── .env                 → API keys, tokens (auto-loaded via dotenv)
 └── systemd timers       → Daily scans, weekly digests
 ```
 
@@ -101,6 +119,7 @@ Default: GLM-5.1 via OpenCode Go. Configurable via `config.yaml`:
 model:
   provider: opencode-go
   model_id: glm-5.1
+  # Alternatives: openai, anthropic, google, ollama, or custom OpenAI-compatible API
 ```
 
 ## Tests

@@ -72,21 +72,56 @@ Built full interactive shell with:
 | `/proxmox <action>` | PermissionGate → ProxmoxTools (start/stop/status/generic) |
 | `/quit` | Clean exit with client close |
 
+### Phase 4.5 — Dotenv, SSL, Setup Helper ✅ Complete
+
+#### python-dotenv Integration
+
+- Added `python-dotenv>=1,<2` to dependencies
+- `src/config.py` auto-loads `.env` from project directory or `~/.config/pve-sentinel/.env`
+- No `.bashrc` or `.profile` sourcing needed — works in any shell context
+- `.env` file owned by `kevbot:kevbot`, covered by `.gitignore`
+
+#### SSL Certificate Handling
+
+- Changed `verify_ssl` default to `True` (CIS L1)
+- Added graceful SSL error handling to all CLI commands — shows fix options instead of raw traceback
+- Created `src/setup.py` with `cert` command:
+  - Uses `openssl s_client` to observe TLS handshake on Proxmox port 8006
+  - Extracts root CA cert from chain (last cert in chain)
+  - Installs to `/usr/local/share/ca-certificates/pve-root-ca.crt`
+  - Runs `update-ca-certificates`
+  - If non-root, displays exact sudo command needed
+
+#### Setup Helper Module (`src/setup.py`)
+
+```bash
+uv run python -m src.setup cert      # Install Proxmox CA cert
+uv run python -m src.setup verify    # Test Proxmox API + LLM connectivity
+uv run python -m src.setup wizard    # Interactive setup (placeholder)
+```
+
+#### LXC Environment Fix
+
+- Discovered `.bashrc` non-interactive guard (`case $- in *i*) ;; *) return;; esac`) prevented `.env` sourcing via `su - kevbot -c`
+- Moved `.env` sourcing to `.profile` (always runs for login shells)
+- Added dotenv as fallback so `.env` works regardless of shell context
+
 ### Files Changed in This Session
 
 | File | Change |
 |------|--------|
-| `cli.py` | Complete rewrite: banner-only stub → full interactive REPL (~350 lines) |
-| `src/config.py` | Removed dead opencode code, added encoding, token validation |
+| `cli.py` | Complete rewrite: banner-only stub → full interactive REPL (~350 lines). Added SSL error handling to all command handlers. |
+| `src/config.py` | Removed dead opencode code, added dotenv, added encoding, token validation |
 | `src/database.py` | Added mode=0o700 for DB dir, id validation on insert |
 | `src/opencode_client.py` | API key validation, context manager, cached guardrails, better errors |
 | `src/guardrails.py` | No changes (already clean) |
 | `src/cve_scanner.py` | httpx migration, connection leak fix, removed Exploit-DB scraping |
 | `src/proxmox_tools.py` | verify_ssl=True, __repr__ redaction, run_command gating, _user attr |
 | `src/permission_gate.py` | DENY_ALWAYS populated, secrets.choice, 6-char tokens, exact matching |
+| `src/setup.py` | New: setup helper with cert, verify, wizard commands |
 | `src/scanner_cli.py` | New: systemd timer entry point |
-| `pyproject.toml` | v0.2.0, removed requests, added entry point, pinned versions, added pyfiglet |
-| `config.yaml.example` | verify_ssl=true, removed opencode section, cleaned up |
+| `pyproject.toml` | v0.2.0, removed requests, added entry point, pinned versions, added pyfiglet, python-dotenv |
+| `config.yaml.example` | verify_ssl=true, removed opencode section, added Option B docs, Google provider noted |
 | `systemd/opencode-server.service` | Deleted (dead code) |
 | `systemd/cve-scanner.service` | Rewritten: proper WorkingDirectory, script entry point |
 | `systemd/cve-scanner.timer` | Requires= → After= |
@@ -95,9 +130,9 @@ Built full interactive shell with:
 | `tests/test_permission_gate.py` | Added deny_always, empty action, exact match tests |
 | `tests/test_opencode_client.py` | New: 11 tests |
 | `tests/test_proxmox_tools.py` | New: 9 tests |
-| `AGENTS.md` | Full rewrite with Phase 0/3 status, security hardening table |
+| `AGENTS.md` | Full rewrite with Phase 0/3/4.5 status, security hardening table, file inventory |
 | `PROGRESS.md` | This file |
-| `README.md` | Updated with CLI commands, new architecture |
+| `README.md` | Updated with CLI commands, new architecture, guardrails table |
 
 ### Next: Phase 5 — Host + LXC CVE Monitoring
 

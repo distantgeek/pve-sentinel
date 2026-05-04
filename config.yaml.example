@@ -3,7 +3,7 @@
 
 # ── Model ──────────────────────────────────────────────────
 model:
-  # Provider: opencode-go, openai, anthropic, ollama, or custom
+  # Provider: opencode-go, openai, anthropic, google, ollama, or custom
   provider: opencode-go
   
   # Model ID (GLM-5.1 strongly recommended for advisory tasks)
@@ -25,8 +25,6 @@ guardrails:
   # custom: |
   #   You are a Proxmox VE security advisor operating under [framework].
   #   For every recommendation, reference [specific controls].
-  
-  # Run 'uv run python3 -c "from src.guardrails import list_presets; print(list_presets())"' to see all presets
 
 # ── Proxmox ────────────────────────────────────────────────
 proxmox:
@@ -36,7 +34,9 @@ proxmox:
   # Token value from environment variable (never hardcoded)
   token_value_env: PROXMOX_TOKEN_VALUE
   node: ""                      # auto-detected if blank
-  verify_ssl: true              # CIS L1: verify TLS certificates
+  verify_ssl: true              # Recommended: install Proxmox CA cert with:
+                                #   uv run python -m src.setup cert
+                                # Or set to false for homelab self-signed certs
 
 # ── CVE Scanner ────────────────────────────────────────────
 cve:

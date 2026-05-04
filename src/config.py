@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 
 
 def load_config(path: str | Path | None = None) -> dict:
@@ -15,10 +16,24 @@ def load_config(path: str | Path | None = None) -> dict:
         3. ./config.yaml (current directory)
         4. ~/.config/pve-sentinel/config.yaml
 
+    Before loading, attempts to load .env from:
+        1. ./ .env (current directory)
+        2. ~/.config/pve-sentinel/.env
+
     Raises:
         FileNotFoundError: If no config file is found.
         ValueError: If config is empty, invalid, or required secrets are missing.
     """
+    # Load .env file if present (python-dotenv)
+    candidates = [
+        Path(".env"),
+        Path.home() / ".config" / "pve-sentinel" / ".env",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            load_dotenv(dotenv_path=candidate)
+            break
+
     if path is None:
         env_config = os.environ.get("SENTINEL_CONFIG")
         if env_config:

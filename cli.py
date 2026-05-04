@@ -65,6 +65,18 @@ def print_banner() -> None:
     console.print()
 
 
+def _ssl_error_panel(error: Exception) -> Panel:
+    """Create a helpful panel for SSL certificate errors."""
+    return Panel(
+        "Your Proxmox host uses a self-signed certificate.\n\n"
+        "Fix options:\n"
+        "  1. [bold]uv run python -m src.setup cert[/bold] — install the Proxmox CA cert\n"
+        "  2. Set [bold]verify_ssl: false[/bold] in config.yaml (homelab only)",
+        title="SSL Certificate Verification Failed",
+        border_style="red",
+    )
+
+
 # ── CLI Shell ──────────────────────────────────────────────────────
 
 class SentinelShell:
@@ -142,11 +154,15 @@ class SentinelShell:
                 verify_ssl=pmx.get("verify_ssl", True),
             )
         except Exception as e:
-            self.console.print(Panel(
-                f"[yellow]Proxmox unavailable:[/yellow] {e}",
-                title="Proxmox API",
-                border_style="yellow",
-            ))
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(Panel(
+                    f"[yellow]Proxmox unavailable:[/yellow] {e}",
+                    title="Proxmox API",
+                    border_style="yellow",
+                ))
             return None
 
     def _init_gate(self) -> PermissionGate:
@@ -323,7 +339,11 @@ class SentinelShell:
                 self.console.print(lxc_table)
 
         except Exception as e:
-            self.console.print(f"[red]Status error:[/red] {e}")
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Status error:[/red] {e}")
 
     def _cmd_history(self, parts: list[str]) -> None:
         """Display recent scan history."""
@@ -394,7 +414,11 @@ class SentinelShell:
                 if summary:
                     self.console.print(Markdown(summary))
         except Exception as e:
-            self.console.print(f"[red]Scan error:[/red] {e}")
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Scan error:[/red] {e}")
 
     def _cmd_cve(self, parts: list[str]) -> None:
         """CVE subcommands: check <pkg>, scan."""
@@ -515,7 +539,6 @@ class SentinelShell:
                     return
 
                 if action == "start":
-                    # Try VM first, then LXC
                     try:
                         result = self.proxmox.start_vm(vmid)
                         self.console.print(f"[green]VM {vmid} started.[/green]")
@@ -530,14 +553,17 @@ class SentinelShell:
                         result = self.proxmox.stop_lxc(vmid)
                         self.console.print(f"[green]LXC {vmid} stopped.[/green]")
             else:
-                # Generic API call via run_command (read-only or gated)
                 api_path = "/".join(parts[1:])
                 result = self.proxmox.run_command(f"/{api_path}", method="get")
                 self.console.print(result)
         except PermissionError as e:
             self.console.print(f"[red]Permission denied:[/red] {e}")
         except Exception as e:
-            self.console.print(f"[red]Proxmox error:[/red] {e}")
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Proxmox error:[/red] {e}")
 
 
 # ── Entry Point ────────────────────────────────────────────────────

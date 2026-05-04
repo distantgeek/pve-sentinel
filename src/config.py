@@ -2,14 +2,8 @@
 
 import os
 from pathlib import Path
-from typing import Any
 
 import yaml
-
-
-def _env_or(value: Any, env_var: str) -> Any:
-    """Return environment variable if set, otherwise the config value."""
-    return os.environ.get(env_var, value)
 
 
 def load_config(path: str | Path | None = None) -> dict:
@@ -20,6 +14,10 @@ def load_config(path: str | Path | None = None) -> dict:
         2. SENTINEL_CONFIG environment variable
         3. ./config.yaml (current directory)
         4. ~/.config/pve-sentinel/config.yaml
+
+    Raises:
+        FileNotFoundError: If no config file is found.
+        ValueError: If config is empty, invalid, or required secrets are missing.
     """
     if path is None:
         env_config = os.environ.get("SENTINEL_CONFIG")
@@ -40,7 +38,7 @@ def load_config(path: str | Path | None = None) -> dict:
                     "or set SENTINEL_CONFIG environment variable."
                 )
 
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     if config is None:
@@ -50,12 +48,12 @@ def load_config(path: str | Path | None = None) -> dict:
     if "proxmox" in config:
         pmx = config["proxmox"]
         token_env = pmx.get("token_value_env", "PROXMOX_TOKEN_VALUE")
-        pmx["token_value"] = os.environ.get(token_env, "")
-
-    # Resolve opencode password
-    if "opencode" in config:
-        oc = config["opencode"]
-        pass_env = oc.get("password_env", "SENTINEL_OPENCODE_PASSWORD")
-        oc["password"] = os.environ.get(pass_env, "")
+        token_value = os.environ.get(token_env, "")
+        if not token_value:
+            raise ValueError(
+                f"Proxmox token value is empty. Set the '{token_env}' "
+                "environment variable before running pve-sentinel."
+            )
+        pmx["token_value"] = token_value
 
     return config

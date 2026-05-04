@@ -10,58 +10,87 @@ infrastructure guidance — with human-in-the-loop permission gating.
 
 ## Features
 
-- **CVE Monitoring** — Multi-source vulnerability intelligence (NVD, MITRE,
-  Exploit-DB, Proxmox PVE-SA) with daily scheduled scans and on-demand digests
+- **Interactive CLI** — prompt_toolkit REPL with tab completion, command history,
+  and rich output formatting (tables, panels, markdown)
+- **CVE Monitoring** — Multi-source vulnerability intelligence (NVD, MITRE)
+  with daily scheduled scans and on-demand digests
 - **Host + LXC Scanning** — Package-level vulnerability detection on both the
   Proxmox host and all LXC containers via native `pct exec`
 - **Proxmox-Aware Remediation** — Correlates CVEs against Proxmox's curated
   package repos, never suggests upstream version pinning that could break PVE
-- **Public Exploit Detection** — Cross-references Exploit-DB to escalate
-  severity when working PoCs exist
-- **Intelligent Advisory** — GLM-5.1 provides contextual guidance,
-  workarounds, and mitigation strategies
+- **LLM Advisory Chat** — GLM-5.1 provides contextual guidance, workarounds,
+  and mitigation strategies with security framework guardrails
 - **Permission Gating** — Read operations auto-approved; write operations
   require explicit confirmation; destructive operations require a random token
+- **Security Guardrails** — LLM responses constrained to NIST CSF AI Profile,
+  CIS Ubuntu Level 1, or CIS AI Controls Matrix frameworks
 - **Guest VM Scanning** *(opt-in)* — Vulnerabilities inside VMs via QEMU
   Guest Agent, with multi-method package discovery (dpkg/rpm/apk/flatpak/npm/
   pip/containers)
-- **Open WebUI Ready** — OpenAI-compatible API endpoint for integration with
-  Open WebUI or any chat frontend
 
 ## Quick Start
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVED/main/ct/pve-sentinel.sh)"
-```
+# Clone and install
+git clone https://github.com/distantgeek/pve-sentinel.git
+cd pve-sentinel
+uv sync
 
-After installation, SSH into the LXC:
+# Configure
+cp config.yaml.example config.yaml
+# Edit config.yaml with your Proxmox host details
 
-```bash
-ssh sentinel@<lxc-ip>
+# Set environment variables
+export OPENCODE_GO_API_KEY="your-key"
+export PROXMOX_TOKEN_VALUE="your-uuid-secret"
+
+# Launch the CLI
+uv run python cli.py
 ```
 
 ## CLI Commands
 
 ```
-/digest              Run full CVE scan (host + LXCs)
+/digest              Run full CVE scan and LLM summary
 /cve check <pkg>     Deep-dive a specific package
 /cve scan            Run host-only CVE scan
-/scan guests         Scan all running VMs with QEMU agent
-/scan full           Host + LXCs + VMs
-/proxmox <action>    Proxmox API operation (write = confirm required)
 /status              Proxmox resource overview
-/history             Recent conversation
+/proxmox <action>    Proxmox API operation (write = confirm required)
+/guardrails [preset] Show or switch security framework preset
+/history             Recent scan history
 /help                Command reference
+/quit                Exit the shell
 ```
+
+Free-text input is sent directly to the LLM for advisory chat.
 
 ## Architecture
 
 ```
 LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
-  ├── opencode serve       → GLM-5.1 via OpenCode Go
-  ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
-  ├── SQLite               → CVE database, package inventory
-  └── systemd timers       → Daily scans, weekly digests
+├── OpenCode Go REST API → GLM-5.1 (direct HTTPS, no local server)
+├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
+├── SQLite               → CVE database, package inventory (12 tables)
+└── systemd timers       → Daily scans, weekly digests
+```
+
+## Security Guardrails
+
+Four named presets constrain the LLM's advisory perspective:
+
+| Preset | Framework |
+|--------|-----------|
+| `general` | Pragmatic security-first advisory (default) |
+| `cis-ubuntu-l1` | CIS Ubuntu Linux Benchmark Level 1 |
+| `cis-ai` | CIS AI Controls Matrix |
+| `nist-cyber-ai` | NIST CSF AI Profile (NIST IR 8596 iprd) |
+
+Configure in `config.yaml`:
+
+```yaml
+guardrails:
+  enabled: true
+  preset: nist-cyber-ai
 ```
 
 ## Model Configuration
@@ -72,8 +101,16 @@ Default: GLM-5.1 via OpenCode Go. Configurable via `config.yaml`:
 model:
   provider: opencode-go
   model_id: glm-5.1
-  # Alternatives: deepseek-v4-pro, qwen3-coder, or any OpenAI-compatible API
 ```
+
+## Tests
+
+```bash
+uv run pytest tests/ -v
+```
+
+62 tests across 7 modules: config, cve_scanner, database, guardrails,
+opencode_client, permission_gate, proxmox_tools.
 
 ## License
 

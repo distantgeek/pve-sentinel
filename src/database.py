@@ -144,7 +144,8 @@ class Database:
 
     def __init__(self, db_path: str | Path = "sentinel.db"):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # CIS L1: restrict directory permissions to owner only
+        self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -164,6 +165,10 @@ class Database:
 
     def insert_cve(self, cve_data: dict) -> None:
         """Insert or update a CVE record."""
+        cve_id = cve_data.get("id")
+        if not cve_id:
+            raise ValueError("CVE data missing required 'id' field")
+
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO cves
@@ -174,7 +179,7 @@ class Database:
                     raw_json)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    cve_data["id"],
+                    cve_id,
                     cve_data.get("description", ""),
                     cve_data.get("severity", ""),
                     cve_data.get("cvss_score"),

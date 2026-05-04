@@ -4,6 +4,8 @@ Uses proxmoxer for API communication. All write operations pass through
 the permission gate before execution.
 """
 
+import json
+import subprocess
 from typing import Any
 
 from proxmoxer import ProxmoxAPI
@@ -12,6 +14,11 @@ from proxmoxer import ProxmoxAPI
 class ProxmoxTools:
     """Read and (permission-gated) write operations on the Proxmox API."""
 
+    # Read-only API paths that bypass permission gates (GET only)
+    READ_ONLY_PATHS = frozenset({
+        "/nodes", "/status", "/cluster/status", "/version",
+    })
+
     def __init__(
         self,
         host: str,
@@ -19,16 +26,24 @@ class ProxmoxTools:
         token_name: str,
         token_value: str,
         node: str = "",
-        verify_ssl: bool = False,
+        verify_ssl: bool = True,
     ):
         self.host = host
+        self._user = user
         self.node = node
+        self._verify_ssl = verify_ssl
         self.api = ProxmoxAPI(
             host,
             user=user,
             token_name=token_name,
             token_value=token_value,
             verify_ssl=verify_ssl,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"ProxmoxTools(host={self.host!r}, user={self._user!r}, "
+            f"node={self.node!r}, verify_ssl={self._verify_ssl})"
         )
 
     def _get_node(self) -> str:
@@ -94,9 +109,6 @@ class ProxmoxTools:
 
         Uses pvesh to query apt update status.
         """
-        import subprocess
-        import json
-
         try:
             result = subprocess.run(
                 ["pvesh", "get", f"/nodes/{self._get_node()}/apt/updates",
@@ -116,9 +128,6 @@ class ProxmoxTools:
 
     def get_lxc_packages(self, lxc_id: int) -> list[dict[str, str]]:
         """Get installed packages inside an LXC via pct exec."""
-        import subprocess
-        import json
-
         # Detect OS type first
         try:
             os_check = subprocess.run(
@@ -135,13 +144,14 @@ class ProxmoxTools:
 
         # Determine package manager
         if "debian" in os_release or "ubuntu" in os_release:
+            # $ characters are safe in list form — no shell expansion occurs
             cmd = ["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Architecture}\n"]
         elif "fedora" in os_release or "centos" in os_release or "rhel" in os_release:
             cmd = ["rpm", "-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n"]
         elif "alpine" in os_release:
             cmd = ["apk", "info", "-v"]
         else:
-            return []  # Unknown OS
+            return []  # Unknown OS — caller should log a warning
 
         try:
             result = subprocess.run(
@@ -186,12 +196,40 @@ class ProxmoxTools:
         return self.api.nodes(node).lxc(vmid).status.stop.post()
 
     def run_command(self, api_path: str, method: str = "get") -> dict:
-        """Run an arbitrary Proxmox API command. Requires permission confirmation."""
-        import subprocess
-        import json
+        """Run an arbitrary Proxmox API command.
 
-        cmd = ["pvesh", method, api_path, "--output-format", "json"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0:
-            return json.loads(result.stdout)
-        raise RuntimeError(f"API command failed: {result.stderr}")
+        SECURITY: This method validates the path against a read-only allowlist.
+        Write/modify paths must go through specific methods with permission gates.
+        """
+        # Block destructive paths entirely
+        lower_path = api_path.lower()
+        for keyword in ("destroy", "delete", "remove", "unlink", "purge"):
+            if keyword in lower_path:
+                raise PermissionError(
+                    f"Destructive operation blocked: '{keyword}' in path '{api_path}'. "
+                    "Use specific methods with permission gates instead."
+                )
+
+        # Write methods always require permission gate
+        if method.lower() != "get":
+            raise PermissionError(
+                f"Method '{method}' on path '{api_path}' requires permission gate. "
+                "Use /proxmox command in the CLI for write operations."
+            )
+
+        # Allow read-only paths without restriction
+        for allowed in self.READ_ONLY_PATHS:
+            if api_path.startswith(allowed):
+                result = subprocess.run(
+                    ["pvesh", method, api_path, "--output-format", "json"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0:
+                    return json.loads(result.stdout)
+                raise RuntimeError(f"API command failed: {result.stderr}")
+
+        # All other paths require explicit permission gate (handled by CLI layer)
+        raise PermissionError(
+            f"Path '{api_path}' requires permission gate. "
+            "Use /proxmox command in the CLI for write operations."
+        )

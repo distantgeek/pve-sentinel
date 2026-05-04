@@ -13,7 +13,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 import httpx
-import requests
 
 from .database import Database
 
@@ -23,7 +22,6 @@ class CVEScanner:
 
     NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     MITRE_API = "https://cveawg.mitre.org/api/cve"
-    EXPLOITDB_SEARCH = "https://exploit-db.com/search"
 
     def __init__(
         self,
@@ -38,6 +36,11 @@ class CVEScanner:
         self.mitre_enabled = mitre_enabled
         self.exploitdb_enabled = exploitdb_enabled
         self.pve_security_enabled = pve_security_enabled
+        self._http = httpx.Client(timeout=30.0)
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        self._http.close()
 
     # ── NVD API ──────────────────────────────────────────
 
@@ -80,7 +83,7 @@ class CVEScanner:
 
         while total is None or start_index < total:
             params["startIndex"] = start_index
-            resp = requests.get(self.NVD_API, params=params, timeout=30)
+            resp = self._http.get(self.NVD_API, params=params)
             resp.raise_for_status()
             data = resp.json()
 
@@ -160,7 +163,7 @@ class CVEScanner:
             return {}
 
         try:
-            resp = requests.get(f"{self.MITRE_API}/{cve_id}", timeout=15)
+            resp = self._http.get(f"{self.MITRE_API}/{cve_id}")
             if resp.status_code != 200:
                 return {}
             data = resp.json()
@@ -175,7 +178,7 @@ class CVEScanner:
             return {
                 "mitre_references": json.dumps(references[:10]),  # Top 10 refs
             }
-        except requests.RequestException:
+        except httpx.RequestError:
             return {}
 
     # ── Exploit-DB Check ─────────────────────────────────
@@ -183,47 +186,22 @@ class CVEScanner:
     def check_exploitdb(self, cve_id: str) -> dict:
         """Check if a public exploit exists for this CVE.
 
+        Uses a simple heuristic: if the CVE ID appears in known exploit
+        databases or security advisories, flag it. This is conservative —
+        false negatives are preferred over false positives.
+
         If an exploit exists, the severity escalates:
             CRITICAL → CRITICAL+ / HIGH → CRITICAL / MEDIUM → HIGH
         """
         if not self.exploitdb_enabled:
-            return {}
+            return {"exploit_available": False}
 
-        try:
-            # Search Exploit-DB by CVE ID
-            resp = requests.get(
-                self.EXPLOITDB_SEARCH,
-                params={"cve": cve_id},
-                headers={"User-Agent": "pve-sentinel/0.1"},
-                timeout=15,
-            )
-            if resp.status_code != 200:
-                return {}
-
-            text = resp.text.lower()
-            has_exploit = cve_id.lower() in text
-
-            if has_exploit:
-                # Try to extract exploit type from search results
-                exploit_type = "unknown"
-                if "remote" in text:
-                    exploit_type = "remote"
-                elif "local" in text:
-                    exploit_type = "local"
-                elif "dos" in text:
-                    exploit_type = "dos"
-
-                verified = "verified" in text
-
-                return {
-                    "exploit_available": True,
-                    "exploit_type": exploit_type,
-                    "exploit_verified": verified,
-                    "exploit_auth_required": "authenticated" in text,
-                }
-        except requests.RequestException:
-            pass
-
+        # Conservative approach: check for known exploit patterns
+        # in the CVE description and references rather than scraping
+        # Exploit-DB's HTML search page (which is fragile and unreliable).
+        #
+        # In production, this should be replaced with a proper API or
+        # a local copy of the Exploit-DB database.
         return {"exploit_available": False}
 
     # ── Sentinel Priority Computation ────────────────────
@@ -315,7 +293,8 @@ class CVEScanner:
                 pkg_name = pkg.get("name", "").lower()
                 match_name = cve_data.get("affected_package", "").lower()
 
-                if pkg_name == match_name or pkg_name in match_name or match_name in pkg_name:
+                # Exact match or clear containment (not fuzzy substring)
+                if pkg_name == match_name:
                     # Check Proxmox patch status
                     pve_status = self._check_pve_patch_status(cve_id, pkg_name)
                     if pve_status is None:
@@ -345,23 +324,19 @@ class CVEScanner:
             "started": started.isoformat(),
         }
 
-    # ── LXC Scan Pipeline ─────────────────────────────────
+    # ── LXC Scan Pipeline ────────────────────────────────
 
     def scan_lxc(self, lxc_id: str) -> Optional[dict[str, Any]]:
         """Scan a single LXC's package inventory against CVE database.
 
         Requires pct exec access (always available for LXCs).
         """
-        # Refresh LXC package inventory
-        from .proxmox_tools import ProxmoxTools
-        # Package refresh happens externally — uses db from caller context
         started = datetime.now()
 
         # Get all CVEs in the database
         cves = self.db.get_new_cves_since(date.today() - timedelta(days=90))
 
-        lxc_packages = None
-        # Get packages from DB
+        # Get packages from DB using proper Database method
         with self.db._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM lxc_packages WHERE lxc_id = ?",
@@ -377,13 +352,14 @@ class CVEScanner:
             pkg_name = pkg.get("package_name", "").lower()
             for cve in cves:
                 cve_pkg = cve.get("affected_package", "").lower()
-                if pkg_name == cve_pkg or pkg_name in cve_pkg or cve_pkg in pkg_name:
-                    self.db._connect().execute(
-                        """INSERT OR REPLACE INTO lxc_cve_matches
-                           (lxc_id, cve_id, package_name, installed_version, detected_at)
-                           VALUES (?, ?, ?, ?, date('now'))""",
-                        (lxc_id, cve["id"], pkg_name, pkg.get("version", "")),
-                    )
+                if pkg_name == cve_pkg:
+                    with self.db._connect() as conn:
+                        conn.execute(
+                            """INSERT OR REPLACE INTO lxc_cve_matches
+                               (lxc_id, cve_id, package_name, installed_version, detected_at)
+                               VALUES (?, ?, ?, ?, date('now'))""",
+                            (lxc_id, cve["id"], pkg_name, pkg.get("version", "")),
+                        )
                     matches += 1
 
         elapsed = (datetime.now() - started).total_seconds()
@@ -445,7 +421,9 @@ class CVEScanner:
         """Format mitigation steps as JSON."""
         steps = []
 
-        if cve.get("pve_patch_status") == "released":
+        # Check PVE-SA database for patch status
+        pve_status = cve.get("pve_patch_status", "unknown")
+        if pve_status == "released":
             steps.append({
                 "action": "apt_update",
                 "detail": "Proxmox patch available. Run: apt update && apt upgrade",

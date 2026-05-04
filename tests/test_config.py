@@ -13,18 +13,13 @@ model:
   provider: opencode-go
   model_id: glm-5.1
 
-opencode:
-  host: "127.0.0.1"
-  port: 4096
-  password_env: SENTINEL_OPENCODE_PASSWORD
-
 proxmox:
   host: "192.168.1.100"
   user: "testuser@pam"
   token_name: "testToken"
   token_value_env: PROXMOX_TOKEN_VALUE
   node: ""
-  verify_ssl: false
+  verify_ssl: true
 
 cve:
   nvd_api_enabled: true
@@ -46,14 +41,17 @@ class TestConfig:
             config_path = f.name
 
         try:
+            os.environ["PROXMOX_TOKEN_VALUE"] = "test-token"
             config = load_config(config_path)
             assert config["model"]["provider"] == "opencode-go"
             assert config["model"]["model_id"] == "glm-5.1"
             assert config["proxmox"]["host"] == "192.168.1.100"
             assert config["cve"]["nvd_api_enabled"] is True
             assert config["storage"]["db_path"] == "./test.db"
+            assert config["proxmox"]["token_value"] == "test-token"
         finally:
             os.unlink(config_path)
+            del os.environ["PROXMOX_TOKEN_VALUE"]
 
     def test_load_config_resolves_token_env(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -68,19 +66,32 @@ class TestConfig:
             os.unlink(config_path)
             del os.environ["PROXMOX_TOKEN_VALUE"]
 
-    def test_load_config_resolves_password_env(self):
+    def test_load_config_raises_on_empty_token(self):
+        """Config must reject empty Proxmox token values."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(SAMPLE_CONFIG)
             config_path = f.name
 
         try:
-            os.environ["SENTINEL_OPENCODE_PASSWORD"] = "test-password"
-            config = load_config(config_path)
-            assert config["opencode"]["password"] == "test-password"
+            os.environ["PROXMOX_TOKEN_VALUE"] = ""
+            with pytest.raises(ValueError, match="token value is empty"):
+                load_config(config_path)
         finally:
             os.unlink(config_path)
-            del os.environ["SENTINEL_OPENCODE_PASSWORD"]
+            del os.environ["PROXMOX_TOKEN_VALUE"]
 
     def test_load_config_missing_file(self):
         with pytest.raises(FileNotFoundError):
             load_config("/nonexistent/config.yaml")
+
+    def test_load_config_empty_file(self):
+        """Config must reject empty YAML files."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            config_path = f.name
+
+        try:
+            with pytest.raises(ValueError, match="Empty or invalid"):
+                load_config(config_path)
+        finally:
+            os.unlink(config_path)

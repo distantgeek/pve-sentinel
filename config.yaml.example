@@ -36,7 +36,7 @@ proxmox:
   # Token value from environment variable (never hardcoded)
   token_value_env: PROXMOX_TOKEN_VALUE
   node: ""                      # auto-detected if blank
-  verify_ssl: false
+  verify_ssl: true              # CIS L1: verify TLS certificates
 
 # ── CVE Scanner ────────────────────────────────────────────
 cve:
@@ -54,10 +54,7 @@ cve:
   
   # NVD API rate limiting (requests per 6 seconds)
   nvd_rate_limit: 5
-  
-  # Exploit-DB reference
-  exploitdb_base_url: "https://exploit-db.com"
-  
+
 # ── Guest Scanning ─────────────────────────────────────────
 guests:
   # VM scanning requires QEMU Guest Agent
@@ -99,10 +96,3 @@ storage:
   digest_dir: "./digests"       # CVE digest output directory
   log_dir: "./logs"             # Application logs
   max_digest_age: 90            # days to keep digests
-
-# ── External Scanner Bridge ─────────────────────────────────
-# Optional: correlate findings with an external vulnerability scanner
-external_scanner:
-  enabled: false
-  # type: openvas
-  # api_url: https://openvas.lan:9390

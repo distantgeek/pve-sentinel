@@ -4,7 +4,7 @@ Enforces human-in-the-loop confirmation for all Proxmox write operations.
 Read operations are auto-approved. Destructive operations require a random token.
 """
 
-import random
+import secrets
 import string
 from enum import Enum
 from typing import Callable
@@ -18,18 +18,20 @@ class ActionLevel(Enum):
 
 
 # Actions that require "confirm" (single-word approval)
-WRITE_ACTIONS = {
+WRITE_ACTIONS = frozenset({
     "start", "stop", "reset", "shutdown", "reboot",
     "suspend", "resume", "create", "clone", "migrate",
-}
+})
 
-# Actions that require "CONFIRM-XXXX" (random 4-char token)
-DESTRUCTIVE_ACTIONS = {
+# Actions that require "CONFIRM-XXXXXX" (random 6-char token)
+DESTRUCTIVE_ACTIONS = frozenset({
     "destroy", "remove", "delete", "unlink", "purge",
-}
+})
 
-# Always denied — no confirmation can override
-DENY_ALWAYS = set()
+# Always denied — no confirmation can override (CIS L1 least privilege)
+DENY_ALWAYS = frozenset({
+    "destroy", "remove", "delete", "unlink", "purge",
+})
 
 
 class PermissionGate:
@@ -41,24 +43,28 @@ class PermissionGate:
         deny_always: set[str] | None = None,
         confirm_callback: Callable[[str], bool] | None = None,
     ):
-        self.allowed_write = allowed_write or WRITE_ACTIONS
-        self.deny_always = deny_always or DENY_ALWAYS
+        self.allowed_write = allowed_write or set(WRITE_ACTIONS)
+        self.deny_always = deny_always or set(DENY_ALWAYS)
         self._confirm_callback = confirm_callback or self._default_confirm
 
     def classify(self, action: str) -> ActionLevel:
         """Classify an API action into read, write, or destructive."""
-        action_lower = action.lower()
+        if not action or not action.strip():
+            raise ValueError("Action string cannot be empty")
+
+        action_lower = action.lower().strip()
 
         if action_lower in self.deny_always:
             return ActionLevel.DESTRUCTIVE
 
-        if any(d in action_lower for d in DESTRUCTIVE_ACTIONS):
+        # Exact set membership — no substring matching
+        if action_lower in DESTRUCTIVE_ACTIONS:
             return ActionLevel.DESTRUCTIVE
 
-        if any(w in action_lower for w in self.allowed_write):
+        if action_lower in self.allowed_write:
             return ActionLevel.WRITE
 
-        if action_lower.startswith("get") or action_lower.startswith("list") or action_lower in {"status", "config"}:
+        if action_lower.startswith(("get", "list")) or action_lower in {"status", "config"}:
             return ActionLevel.READ
 
         return ActionLevel.WRITE
@@ -93,10 +99,10 @@ class PermissionGate:
         )
         return self._confirm_callback(prompt, expected="confirm")
 
-    def _generate_token(self, length: int = 4) -> str:
-        """Generate a random confirmation token."""
+    def _generate_token(self, length: int = 6) -> str:
+        """Generate a cryptographically secure confirmation token."""
         chars = string.ascii_uppercase + string.digits
-        return "".join(random.choices(chars, k=length))
+        return "".join(secrets.choice(chars) for _ in range(length))
 
     @staticmethod
     def _default_confirm(prompt: str, expected: str) -> bool:

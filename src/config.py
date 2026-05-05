@@ -71,4 +71,12 @@ def load_config(path: str | Path | None = None) -> dict:
             )
         pmx["token_value"] = token_value
 
+    # Resolve NVD API key (optional)
+    if "cve" in config:
+        cve = config["cve"]
+        nvd_key_env = cve.get("nvd_api_key_env", "NVD_API_KEY")
+        nvd_key = os.environ.get(nvd_key_env, "")
+        if nvd_key:
+            cve["nvd_api_key"] = nvd_key
+
     return config

@@ -385,7 +385,23 @@ class SentinelShell:
         try:
             from src.cve_scanner import CVEScanner
 
-            scanner = CVEScanner(self.db)
+            cve_cfg = self.config.get("cve", {})
+            scanner = CVEScanner(
+                self.db,
+                nvd_api_key=cve_cfg.get("nvd_api_key"),
+                nvd_rate_limit=cve_cfg.get("nvd_rate_limit", 5),
+                mitre_enabled=cve_cfg.get("mitre_api_enabled", True),
+                exploitdb_enabled=cve_cfg.get("exploitdb_enabled", True),
+                pve_security_enabled=cve_cfg.get("pve_security_enabled", True),
+                pve_sa_feed_url=cve_cfg.get("pve_sa_feed_url"),
+            )
+
+            # Sync PVE advisories first
+            if cve_cfg.get("pve_security_enabled", True):
+                new_advisories = scanner.sync_pve_advisories()
+                if new_advisories:
+                    self.console.print(f"[dim]PVE-SA sync: {new_advisories} new advisories[/dim]")
+
             # Get host packages if Proxmox is available
             packages = []
             if self.proxmox:

@@ -115,59 +115,17 @@ def cmd_cert() -> None:
 
     console.print(f"[green]Certificate saved to {ca_file}[/green]")
 
-    # Set SSL_CERT_FILE and REQUESTS_CA_BUNDLE in .env
-    env_file = Path(".env")
-    if not env_file.exists():
-        env_file = Path("advisory/.env")
-    if not env_file.exists():
-        env_file = Path.home() / "advisory" / ".env"
-
-    if env_file.exists():
-        content = env_file.read_text()
-        ssl_cert = f"SSL_CERT_FILE={ca_file}"
-        requests_ca = f"REQUESTS_CA_BUNDLE={ca_file}"
-
-        lines = content.split("\n")
-        new_lines = []
-        added_ssl = False
-        added_requests = False
-        for line in lines:
-            if line.startswith("SSL_CERT_FILE="):
-                new_lines.append(ssl_cert)
-                added_ssl = True
-            elif line.startswith("REQUESTS_CA_BUNDLE="):
-                new_lines.append(requests_ca)
-                added_requests = True
-            else:
-                new_lines.append(line)
-
-        if not added_ssl:
-            new_lines.append("")
-            new_lines.append("# SSL certificate (user-level CA trust store)")
-            new_lines.append(ssl_cert)
-            new_lines.append(requests_ca)
-
-        env_file.write_text("\n".join(new_lines) + "\n")
-        console.print(f"[green]Updated SSL vars in {env_file}[/green]")
-    else:
-        console.print(Panel(
-            f"[yellow].env file not found.[/yellow]\n\n"
-            f"Add these lines to your .env file:\n\n"
-            f"  SSL_CERT_FILE={ca_file}\n"
-            f"  REQUESTS_CA_BUNDLE={ca_file}",
-            title="Manual Step Required",
-            border_style="yellow",
-        ))
-
     console.print()
     console.print(Panel(
-        "[green]Proxmox CA certificate installed (user-level).[/green]\n\n"
+        "[green]Proxmox CA certificate saved (user-level).[/green]\n\n"
         f"Certificate: {ca_file}\n\n"
-        "[yellow]Note:[/yellow] Proxmox's default self-signed CA cert may not include\n"
-        "the keyUsage extension required by modern Python/OpenSSL.\n"
-        "If SSL verification still fails, set [bold]verify_ssl: false[/bold]\n"
-        "in config.yaml (acceptable for homelab environments).",
-        title="Success",
+        "[yellow]Important:[/yellow] Do NOT set SSL_CERT_FILE to this file — it\n"
+        "contains only the Proxmox CA and will break external HTTPS (NVD, MITRE).\n\n"
+        "For homelab environments, set [bold]verify_ssl: false[/bold] in\n"
+        "config.yaml instead. This is acceptable on trusted networks.\n\n"
+        "For production, replace Proxmox's self-signed CA with a standards-\n"
+        "compliant certificate that includes the keyUsage extension.",
+        title="Next Steps",
         border_style="green",
     ))
 

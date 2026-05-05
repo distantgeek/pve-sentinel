@@ -25,16 +25,26 @@ def main() -> None:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    cve_cfg = cfg.get("cve", {})
+
     db = Database(cfg["storage"]["db_path"])
     scanner = CVEScanner(
         db,
-        nvd_rate_limit=cfg.get("cve", {}).get("nvd_rate_limit", 5),
-        mitre_enabled=cfg.get("cve", {}).get("mitre_api_enabled", True),
-        exploitdb_enabled=cfg.get("cve", {}).get("exploitdb_enabled", True),
-        pve_security_enabled=cfg.get("cve", {}).get("pve_security_enabled", True),
+        nvd_api_key=cve_cfg.get("nvd_api_key"),
+        nvd_rate_limit=cve_cfg.get("nvd_rate_limit", 5),
+        mitre_enabled=cve_cfg.get("mitre_api_enabled", True),
+        exploitdb_enabled=cve_cfg.get("exploitdb_enabled", True),
+        pve_security_enabled=cve_cfg.get("pve_security_enabled", True),
+        pve_sa_feed_url=cve_cfg.get("pve_sa_feed_url"),
     )
 
     try:
+        # Sync PVE security advisories first
+        if cve_cfg.get("pve_security_enabled", True):
+            new_advisories = scanner.sync_pve_advisories()
+            if new_advisories:
+                print(f"PVE-SA sync: {new_advisories} new advisories")
+
         # Host scan — packages will be populated by ProxmoxTools in Phase 5
         # For now, run the scan pipeline with empty packages to establish
         # the scan log entry and fetch new CVEs from NVD.

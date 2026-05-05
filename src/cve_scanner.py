@@ -8,6 +8,7 @@ Data sources:
 """
 
 import json
+import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -22,20 +23,25 @@ class CVEScanner:
 
     NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     MITRE_API = "https://cveawg.mitre.org/api/cve"
+    PVE_SA_WIKI = "https://pve.proxmox.com/wiki/Security_Advisories"
 
     def __init__(
         self,
         db: Database,
+        nvd_api_key: Optional[str] = None,
         nvd_rate_limit: int = 5,
         mitre_enabled: bool = True,
         exploitdb_enabled: bool = True,
         pve_security_enabled: bool = True,
+        pve_sa_feed_url: Optional[str] = None,
     ):
         self.db = db
+        self.nvd_api_key = nvd_api_key
         self.nvd_rate_limit = nvd_rate_limit
         self.mitre_enabled = mitre_enabled
         self.exploitdb_enabled = exploitdb_enabled
         self.pve_security_enabled = pve_security_enabled
+        self.pve_sa_feed_url = pve_sa_feed_url or self.PVE_SA_WIKI
         self._http = httpx.Client(timeout=30.0)
 
     def close(self) -> None:
@@ -77,13 +83,21 @@ class CVEScanner:
         if severity:
             params["cvssV3Severity"] = severity
 
+        headers: dict[str, str] = {}
+        if self.nvd_api_key:
+            headers["apiKey"] = self.nvd_api_key
+            # With API key: 50 req/6s; without: 5 req/6s
+            effective_rate = max(self.nvd_rate_limit, 50)
+        else:
+            effective_rate = self.nvd_rate_limit
+
         cves = []
         start_index = 0
         total = None
 
         while total is None or start_index < total:
             params["startIndex"] = start_index
-            resp = self._http.get(self.NVD_API, params=params)
+            resp = self._http.get(self.NVD_API, params=params, headers=headers)
             resp.raise_for_status()
             data = resp.json()
 
@@ -96,8 +110,8 @@ class CVEScanner:
 
             start_index += len(data.get("vulnerabilities", []))
 
-            # Rate limit: NVD allows ~5 req/6s without API key
-            time.sleep(6.0 / self.nvd_rate_limit)
+            # Rate limit
+            time.sleep(6.0 / effective_rate)
 
         return cves
 
@@ -370,6 +384,109 @@ class CVEScanner:
             "cves_matched": matches,
             "duration": elapsed,
         }
+
+    # ── Proxmox PVE-SA Feed Parser ───────────────────────
+
+    def fetch_pve_advisories(self) -> list[dict]:
+        """Fetch and parse Proxmox Security Advisories from the wiki.
+
+        Parses the Security_Advisories wiki page to extract advisory IDs,
+        CVE references, affected packages, and patch versions.
+
+        Returns:
+            List of advisory dicts ready for DB insertion.
+        """
+        if not self.pve_security_enabled:
+            return []
+
+        try:
+            resp = self._http.get(self.pve_sa_feed_url)
+            if resp.status_code != 200:
+                return []
+            html = resp.text
+        except httpx.RequestError:
+            return []
+
+        advisories = []
+        # Parse advisory table rows from the wiki HTML
+        # Pattern: PVE-SA-YYYY-NNNN entries with CVE references
+        # The wiki uses a table format with columns: Advisory, CVE(s), Package, Version
+        pve_sa_pattern = re.compile(
+            r"PVE-SA-(\d{4})-(\d+)"  # Advisory ID
+        )
+
+        # Extract all advisory blocks
+        # Look for table rows containing PVE-SA references
+        rows = html.split("\n")
+        current_advisory = None
+
+        for line in rows:
+            # Match advisory ID
+            sa_match = pve_sa_pattern.search(line)
+            if sa_match:
+                year = sa_match.group(1)
+                num = sa_match.group(2)
+                advisory_id = f"PVE-SA-{year}-{num}"
+
+                # Extract CVE IDs from the same line or nearby
+                cve_matches = re.findall(r"CVE-\d{4}-\d+", line)
+
+                # Extract package name (usually in a code block or link)
+                pkg_match = re.search(r"`([^`]+)`", line)
+                package = pkg_match.group(1) if pkg_match else ""
+
+                # Extract version
+                ver_match = re.search(r"(\d[\w.+-]+)", line.split(package)[-1] if package else line)
+                version = ver_match.group(1) if ver_match else ""
+
+                advisories.append({
+                    "id": advisory_id,
+                    "cve_ids": ",".join(cve_matches),
+                    "package": package,
+                    "fixed_version": version,
+                    "url": f"https://pve.proxmox.com/wiki/Security_Advisories#{advisory_id}",
+                    "published": f"{year}-01-01",  # Approximate — wiki doesn't expose exact date
+                })
+
+        return advisories
+
+    def sync_pve_advisories(self) -> int:
+        """Fetch PVE advisories and sync to the local database.
+
+        Returns:
+            Number of new advisories inserted.
+        """
+        advisories = self.fetch_pve_advisories()
+        if not advisories:
+            return 0
+
+        inserted = 0
+        with self.db._connect() as conn:
+            for adv in advisories:
+                # Check if already exists
+                existing = conn.execute(
+                    "SELECT id FROM pve_security_advisories WHERE id = ?",
+                    (adv["id"],),
+                ).fetchone()
+                if existing:
+                    continue
+
+                conn.execute(
+                    """INSERT INTO pve_security_advisories
+                       (id, cve_ids, package, fixed_version, raw_url, published_date)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        adv["id"],
+                        adv["cve_ids"],
+                        adv["package"],
+                        adv["fixed_version"],
+                        adv["url"],
+                        adv["published"],
+                    ),
+                )
+                inserted += 1
+
+        return inserted
 
     # ── Proxmox PVE-SA Check ─────────────────────────────
 

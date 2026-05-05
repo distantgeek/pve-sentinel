@@ -41,9 +41,14 @@ proxmox:
 cve:
   # Data sources
   nvd_api_enabled: true
+  # NVD API key (optional — raises rate limit from 5 req/6s to 50 req/6s)
+  # Set NVD_API_KEY environment variable, then uncomment:
+  # nvd_api_key_env: NVD_API_KEY
   mitre_api_enabled: true
   exploitdb_enabled: true
   pve_security_enabled: true
+  # PVE-SA advisory feed URL
+  pve_sa_feed_url: "https://pve.proxmox.com/wiki/Security_Advisories"
   
   # Schedule (systemd timers override these)
   scan_schedule: "daily"       # daily | weekly

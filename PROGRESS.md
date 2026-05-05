@@ -252,3 +252,35 @@ What needs to be built:
 **Results**
 - Tests: 77 passing (was 68)
 - Version: 0.4.0 (unchanged — additive feature)
+
+### 2026-05-05: VALIDATION_DIRECTIVE Hardening + Conversation Tests ✅ Complete
+
+**Problem: LLM hallucinated commands and suggested unsolicited tools**
+- `pveum audit cve-scan --verbose` — completely fictional command
+- Suggested `lynis`, `nmap`, `fail2ban` without being asked
+- Forced to suggest CLI commands it had no shell access to run
+- No awareness of its own API-only, rootless constraints
+
+**VALIDATION_DIRECTIVE Rewrite (`src/guardrails.py`)**
+- Removed `"Verify with: [command]"` pattern that forced hallucination
+- Added explicit role definition: rootless advisor, API-only access
+- Changed verification format: "Pending Verification — I cannot access [X] via the available API"
+- Added suppression of unsolicited third-party tool recommendations
+- Added plan-before-execute principle for infrastructure changes
+- Model-agnostic — applies to any LLM via OpenAI-compatible API
+
+**Conversation Tests (`tests/test_conversation.py`)**
+- 13 live LLM tests gated behind `PVE_SENTINEL_TEST_LLM=1` env var
+- Tests: no hallucinated commands, no unsolicited tools, pending verification format,
+  no false claims, plan-before-execute, preset framing
+- Skipped by default (costs tokens, slow), opt-in for verification runs
+- Pattern-based assertions against response content
+
+**Updated guardrail tests (`tests/test_guardrails.py`)**
+- Added assertions for new directive principles: rootless advisor, API-only,
+  no third-party tools, plan-before-execute
+
+**Results**
+- Standard tests: 77 passing
+- Conversation tests: 13 (env-gated, run with `PVE_SENTINEL_TEST_LLM=1`)
+- Total: 90 tests available (77 standard + 13 conversation)

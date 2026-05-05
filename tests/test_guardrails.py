@@ -66,3 +66,8 @@ class TestValidationDirective:
         assert "Pending Verification" in VALIDATION_DIRECTIVE
         assert "already configured" in VALIDATION_DIRECTIVE
         assert "data source" in VALIDATION_DIRECTIVE
+        assert "rootless advisor" in VALIDATION_DIRECTIVE
+        assert "API-only access" in VALIDATION_DIRECTIVE
+        assert "Do NOT suggest installing or running third-party tools" in VALIDATION_DIRECTIVE
+        assert "discuss and plan" in VALIDATION_DIRECTIVE
+        assert "Execute API operations only" in VALIDATION_DIRECTIVE

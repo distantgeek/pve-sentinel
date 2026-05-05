@@ -13,7 +13,7 @@
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 77 passing |
+| Tests | `uv run pytest tests/` — 77 passing (+13 env-gated conversation tests) |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
@@ -72,7 +72,11 @@ A single master constant (`src/guardrails.py:VALIDATION_DIRECTIVE`) is prepended
 every guardrail preset (named and custom). It enforces data validation and truthfulness:
 
 - Never make definitive claims about system state you cannot verify
-- Use "Pending Verification" for inaccessible data with verification commands
+- Rootless advisor with API-only access — no shell access to Proxmox host
+- "Pending Verification — I cannot access [X] via the available API" for inaccessible data
+- Suggest verification via Proxmox web GUI or API endpoints, not CLI commands
+- Do NOT suggest installing/running third-party tools unless explicitly asked
+- Discuss and plan infrastructure changes before executing API operations
 - Don't recommend actions that are already configured
 - Cite specific data sources for findings
 - Distinguish verified findings from general best practices
@@ -80,6 +84,7 @@ every guardrail preset (named and custom). It enforces data validation and truth
 - Deep-dive reports: full verbose details, raw data, complete analysis
 
 **Single update point** — change `VALIDATION_DIRECTIVE` once, affects all presets.
+**Model-agnostic** — applies to any LLM plugged in via the OpenAI-compatible API.
 
 ### Framework Presets
 
@@ -197,9 +202,12 @@ LXC network: bridge vmbr0, static IP 192.168.2.5/24, gw 192.168.2.1, DNS 192.168
 ## Test Commands
 
 ```bash
-# On devbox:
+# Standard tests (fast, no API calls):
 cd /var/home/kevbot/pve-sentinel
 uv run pytest tests/ -v
+
+# Conversation tests (live LLM, env-gated):
+PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 
 # On LXC:
 ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5

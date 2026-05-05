@@ -168,11 +168,19 @@ model:
 ## Tests
 
 ```bash
+# Standard tests (fast, no API calls):
 uv run pytest tests/ -v
+
+# Conversation tests (live LLM, env-gated):
+PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 ```
 
-77 tests across 8 modules: config, cve_scanner, database, guardrails,
+77 standard tests across 8 modules: config, cve_scanner, database, guardrails,
 opencode_client, permission_gate, proxmox_tools, setup.
+
+Plus 13 conversation tests (env-gated) that verify LLM guardrail compliance:
+no hallucinated commands, no unsolicited tool suggestions, correct verification
+format, plan-before-execute behavior, and preset framing.
 
 ## License
 

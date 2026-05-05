@@ -79,4 +79,17 @@ def load_config(path: str | Path | None = None) -> dict:
         if nvd_key:
             cve["nvd_api_key"] = nvd_key
 
+    # Validate storage paths (prevent path traversal)
+    if "storage" in config:
+        storage = config["storage"]
+        db_path = storage.get("db_path", "sentinel.db")
+        db_path_obj = Path(db_path).resolve()
+        # Reject paths that escape the project directory
+        project_root = Path.cwd().resolve()
+        if not str(db_path_obj).startswith(str(project_root)) and not str(db_path_obj).startswith(str(Path.home())):
+            raise ValueError(
+                f"Database path '{db_path}' must be within the project directory "
+                f"or home directory. Path traversal is not allowed."
+            )
+
     return config

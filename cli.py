@@ -96,7 +96,8 @@ class SentinelShell:
         self.gate = self._init_gate()
 
         # History directory
-        Path(HISTORY_FILE).parent.mkdir(parents=True, exist_ok=True)
+        history_path = Path(HISTORY_FILE)
+        history_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         # Prompt toolkit session
         self.completer = WordCompleter(SLASH_COMMANDS, ignore_case=True)
@@ -747,9 +748,13 @@ class SentinelShell:
             if action == "status":
                 self._cmd_status(parts)
             elif action in ("start", "stop"):
-                vmid = int(parts[2]) if len(parts) > 2 else None
-                if not vmid:
+                if len(parts) <= 2:
                     self.console.print("[red]VMID required.[/red]")
+                    return
+                try:
+                    vmid = int(parts[2])
+                except ValueError:
+                    self.console.print(f"[red]Invalid VMID:[/red] {parts[2]} (must be an integer)")
                     return
 
                 if action == "start":
@@ -1026,10 +1031,18 @@ class SentinelShell:
         elif subcmd == "vacuum":
             self._db_vacuum()
         elif subcmd == "prune":
-            days = int(parts[2]) if len(parts) >= 3 else 365
+            try:
+                days = int(parts[2]) if len(parts) >= 3 else 365
+            except ValueError:
+                self.console.print(f"[red]Invalid days:[/red] {parts[2]} (must be an integer)")
+                return
             self._db_prune(days)
         elif subcmd == "history":
-            n = int(parts[2]) if len(parts) >= 3 else 10
+            try:
+                n = int(parts[2]) if len(parts) >= 3 else 10
+            except ValueError:
+                self.console.print(f"[red]Invalid count:[/red] {parts[2]} (must be an integer)")
+                return
             self._db_history(n)
         else:
             self.console.print(f"[red]Unknown subcommand:[/red] {subcmd}")

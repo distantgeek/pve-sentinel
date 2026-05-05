@@ -467,13 +467,6 @@ class CVEScanner:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return []
 
-        return {
-            "lxc_id": lxc_id,
-            "packages_checked": len(lxc_packages),
-            "cves_matched": matches,
-            "duration": elapsed,
-        }
-
     # ── Proxmox PVE-SA Feed Parser ───────────────────────
 
     def fetch_pve_advisories(self) -> list[dict]:

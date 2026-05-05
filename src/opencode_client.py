@@ -73,6 +73,9 @@ class OpenCodeClient:
         self.close()
         return False
 
+    def __repr__(self) -> str:
+        return f"OpenCodeClient(provider={self.provider!r}, model={self.model!r}, api_key='***')"
+
     def _load_guardrail(self) -> str:
         """Load guardrail system prompt from config (cached after first call)."""
         if self._guardrail_custom:

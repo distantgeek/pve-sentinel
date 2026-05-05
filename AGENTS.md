@@ -309,3 +309,43 @@ This causes `CERTIFICATE_VERIFY_FAILED` even when the correct CA cert is install
 **Workaround:** Set `verify_ssl: false` in `config.yaml` (acceptable for homelab
 environments on trusted networks). The `src/setup.py cert` command is provided for
 environments where the Proxmox CA has been replaced with a standards-compliant cert.
+
+## Security Compliance
+
+pve-sentinel adheres to three security frameworks:
+
+| Framework | Status | Document |
+|-----------|--------|----------|
+| OWASP Secure Coding Practices | ✅ Compliant | `SECURITY.md` |
+| CIS Secure Coding Standard (Python) | ✅ Compliant | `SECURITY.md` |
+| NIST SSDF (SP 800-218) | ✅ Aligned | `SECURITY.md` |
+
+### Coding Standards
+
+- **No `eval()` or `exec()`** — Never used, never allowed
+- **No `shell=True` in subprocess** — Always use list arguments
+- **Parameterized SQL only** — All queries use `?` placeholders
+- **`secrets` module for tokens** — Never `random` for security-sensitive values
+- **`yaml.safe_load()` only** — Never `yaml.load()`
+- **No hardcoded credentials** — All secrets via environment variables
+- **Input validation** — All user input validated before use
+- **File permissions** — `0o700` for directories, `0o600` for secret files
+- **Resource cleanup** — Context managers and `finally` blocks for all connections
+
+### LLM-Assisted Coding Policy
+
+1. All LLM-generated code is reviewed before merge
+2. All code passes `bandit` security scanning
+3. New features include corresponding tests
+4. All code must comply with OWASP and CIS standards
+5. LLM-assisted commits are documented in commit messages
+
+### Security Scanning
+
+```bash
+# Run bandit security scanner
+uv run bandit src/ -r --severity-level medium
+
+# Run full test suite
+uv run pytest tests/ -v
+```

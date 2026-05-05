@@ -109,9 +109,11 @@ def cmd_cert() -> None:
 
     # Install to user-level CA trust store
     ca_dir = Path.home() / ".local" / "share" / "ca-certificates"
-    ca_dir.mkdir(parents=True, exist_ok=True)
+    ca_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     ca_file = ca_dir / "pve-root-ca.crt"
-    ca_file.write_text(root_ca + "\n")
+    fd = os.open(str(ca_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(root_ca + "\n")
 
     console.print(f"[green]Certificate saved to {ca_file}[/green]")
 

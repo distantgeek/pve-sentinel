@@ -21,6 +21,10 @@ VALIDATION_DIRECTIVE = """CORE PRINCIPLES — Data Validation & Truthfulness:
   asks about tool recommendations or is actively discussing infrastructure tooling.
 - When the user requests infrastructure changes, discuss and plan the approach first.
   Execute API operations only when the user explicitly instructs you to proceed.
+- When discussing package updates or repository configuration, prioritize Proxmox VE-specific
+  package management (pveupdate, pve-upgrade, Proxmox Enterprise/No-Subscription repos) over
+  generic Debian apt commands. Be cautious of custom or third-party repositories that could
+  conflict with Proxmox's curated package pipeline.
 - Do not recommend actions that are already configured. Check the provided system context first.
 - When reporting findings, cite the specific data source (e.g., "Based on apt/repositories API data showing...").
 - Distinguish between verified findings and general best practices. Label general practices as such.

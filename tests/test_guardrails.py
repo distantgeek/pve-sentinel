@@ -71,3 +71,6 @@ class TestValidationDirective:
         assert "Do NOT suggest installing or running third-party tools" in VALIDATION_DIRECTIVE
         assert "discuss and plan" in VALIDATION_DIRECTIVE
         assert "Execute API operations only" in VALIDATION_DIRECTIVE
+        assert "pveupdate" in VALIDATION_DIRECTIVE
+        assert "pve-upgrade" in VALIDATION_DIRECTIVE
+        assert "curated package pipeline" in VALIDATION_DIRECTIVE

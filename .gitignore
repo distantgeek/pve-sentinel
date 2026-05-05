@@ -40,3 +40,6 @@ Thumbs.db
 /var/
 /log/
 /digests/
+
+# Build metadata
+src/.build_ts

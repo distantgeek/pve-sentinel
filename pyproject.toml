@@ -1,6 +1,6 @@
 [project]
 name = "pve-sentinel"
-version = "0.2.0"
+version = "0.5.0"
 description = "LLM-driven security advisory agent for Proxmox VE"
 readme = "README.md"
 requires-python = ">=3.12"

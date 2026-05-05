@@ -27,10 +27,10 @@ from src.guardrails import list_presets
 from src.opencode_client import OpenCodeClient
 from src.permission_gate import PermissionGate
 from src.proxmox_tools import ProxmoxTools
+from src.version import version_string
 
 # ── Constants ──────────────────────────────────────────────────────
 
-VERSION = "0.2.0"
 HISTORY_FILE = str(Path.home() / ".config" / "pve-sentinel" / "cli_history")
 
 COMMANDS = {
@@ -64,7 +64,7 @@ def print_banner() -> None:
     """Print the pve-sentinel banner with version info."""
     console = Console()
     console.print(Text(BANNER, style="bold cyan"))
-    console.print(f"  pve-sentinel v{VERSION} — LLM-driven security advisory agent")
+    console.print(f"  pve-sentinel v{version_string()} — LLM-driven security advisory agent")
     console.print()
 
 

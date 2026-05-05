@@ -5,31 +5,25 @@
 
 LLM-driven security advisory agent for Proxmox VE.
 
-GLM-5.1 driven vulnerability monitoring, CVE tracking, and intelligent
+GLM-5.1 powered vulnerability monitoring, CVE tracking, and intelligent
 infrastructure guidance — with human-in-the-loop permission gating.
 
-## Features
+## What Sentinel Does
 
-- **Interactive CLI** — prompt_toolkit REPL with tab completion, command history,
-  and rich output formatting (tables, panels, markdown)
-- **CVE Monitoring** — Multi-source vulnerability intelligence (NVD, MITRE, PVE-SA)
-  with daily scheduled scans and weekly digest reports
-- **Host + LXC Scanning** — Package-level vulnerability detection on both the
-  Proxmox host and all LXC containers via native `pct exec` and local `dpkg-query`
-- **Proxmox-Aware Remediation** — Correlates CVEs against Proxmox's curated
-  package repos, never suggests upstream version pinning that could break PVE
-- **LLM Advisory Chat** — GLM-5.1 provides contextual guidance, workarounds,
-  and mitigation strategies with security framework guardrails
-- **Permission Gating** — Read operations auto-approved; write operations
-  require explicit confirmation; destructive operations require a random token
-- **Security Guardrails** — LLM responses constrained to NIST CSF AI Profile,
-  CIS Ubuntu Level 1, or CIS AI Controls Matrix frameworks
-- **Setup Helper** — CA cert fetch and connectivity verification
-- **SSH MOTD** — Login banner with quick-start commands and file locations
-- **systemd Timers** — Daily CVE scans + weekly digest reports (user-level)
-- **Guest VM Scanning** *(opt-in)* — Vulnerabilities inside VMs via QEMU
-  Guest Agent, with multi-method package discovery (dpkg/rpm/apk/flatpak/npm/
-  pip/containers)
+| Capability | What It Means |
+|------------|---------------|
+| **CVE Intelligence** | Aggregates NVD, MITRE, and Proxmox PVE-SA advisories into a unified vulnerability feed with daily scans and weekly digests |
+| **Package-Level Scanning** | Detects CVEs against installed packages on the Proxmox host and LXC containers — not just version matching, but PVE repo awareness |
+| **Proxmox-Aware Remediation** | Correlates findings against Proxmox's curated package pipeline. Never suggests upstream version pinning that could break PVE |
+| **LLM Advisory Chat** | GLM-5.1 provides contextual guidance, workarounds, and mitigation strategies — constrained by security framework guardrails |
+| **System Health Monitoring** | Real-time CPU, RAM, storage, disk S.M.A.R.T., service status, and historical RRD metrics via Proxmox API |
+| **Conversation Memory** | Chat history logged with topic extraction. System context (repos, health, services) cached and injected into every conversation |
+| **Permission Gating** | Read operations auto-approved. Write operations require explicit confirmation. Destructive operations require a random token |
+| **Security Guardrails** | LLM responses constrained to NIST CSF AI Profile, CIS Ubuntu Level 1, CIS AI Controls Matrix, or general security-first |
+| **Data Validation ("Soul")** | LLM cannot make claims it cannot verify. Prevents false positives and hallucinated commands. Cites data sources for every finding |
+| **Database Management** | Tiered size warnings (50/75/100MB), VACUUM support, safe pruning with archive tables, conversation history with topic-based retrieval |
+| **API-Efficient Design** | System context cached during scans. Zero extra API calls for chat. Lightweight `/refresh` for on-demand updates |
+| **Scheduled Automation** | systemd timers for daily CVE scans and weekly digest reports. MOTD banner on SSH login with quick-start commands |
 
 ## Quick Start
 
@@ -120,7 +114,7 @@ LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
 ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
 ├── CVE sources          → NVD API, MITRE CVE, PVE-SA wiki feed
 ├── Proxmox API          → proxmoxer (API-only, no pvesh subprocess)
-├── SQLite               → CVE database, package inventory, advisories (12 tables)
+├── SQLite               → CVE database, package inventory, advisories, conversation log
 ├── .env                 → API keys, tokens (auto-loaded via dotenv)
 ├── systemd timers       → Daily scans (00:06), weekly digests (Mon 08:00)
 └── MOTD                 → SSH login banner with quick-start commands
@@ -132,12 +126,17 @@ All LLM responses are constrained by `VALIDATION_DIRECTIVE` — a single constan
 in `src/guardrails.py` that enforces truthfulness:
 
 - Never make claims about system state you cannot verify
-- Use "Pending Verification" for inaccessible data
+- Rootless advisor with API-only access — no shell access to Proxmox host
+- "Pending Verification" for inaccessible data, with timestamp-attributed cached context
+- Do NOT suggest installing or running third-party tools unless explicitly asked
+- Discuss and plan infrastructure changes before executing API operations
+- Prioritize Proxmox-specific package management over generic Debian commands
 - Don't recommend actions that are already configured
 - Cite specific data sources for findings
 
-This prevents false positives like "enable Proxmox repos" when repos are already enabled.
-The LLM receives real repo status from the Proxmox API and can make informed recommendations.
+This prevents false positives like "enable Proxmox repos" when repos are already enabled,
+and stops hallucinated commands like `pveum audit cve-scan` (which doesn't exist).
+The LLM receives real system data from cached snapshots and can make informed recommendations.
 
 ## Security Guardrails
 

@@ -9,6 +9,7 @@ Data sources:
 
 import json
 import re
+import subprocess
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -377,6 +378,94 @@ class CVEScanner:
                     matches += 1
 
         elapsed = (datetime.now() - started).total_seconds()
+
+        return {
+            "lxc_id": lxc_id,
+            "packages_checked": len(lxc_packages),
+            "cves_matched": matches,
+            "duration": elapsed,
+        }
+
+    def scan_local_packages(
+        self,
+        packages: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        """Scan locally-installed packages against the CVE database.
+
+        Designed for running inside an LXC — uses dpkg to enumerate
+        packages and cross-references them against stored CVEs.
+
+        Args:
+            packages: List of dicts with 'name' and 'version' keys.
+                      If empty, auto-detects via dpkg-query.
+
+        Returns:
+            Scan summary dict.
+        """
+        started = datetime.now()
+
+        if not packages:
+            packages = self._get_local_packages()
+
+        # Get CVEs from the last 90 days
+        cves = self.db.get_new_cves_since(date.today() - timedelta(days=90))
+
+        matches = 0
+        matched_cves = []
+        for pkg in packages:
+            pkg_name = pkg.get("name", "").lower()
+            for cve in cves:
+                cve_pkg = cve.get("affected_package", "").lower()
+                if pkg_name == cve_pkg:
+                    with self.db._connect() as conn:
+                        conn.execute(
+                            """INSERT OR REPLACE INTO lxc_cve_matches
+                               (lxc_id, cve_id, package_name, installed_version, detected_at)
+                               VALUES (?, ?, ?, ?, date('now'))""",
+                            ("local", cve["id"], pkg_name, pkg.get("version", "")),
+                        )
+                    matches += 1
+                    matched_cves.append({
+                        "cve_id": cve["id"],
+                        "package": pkg_name,
+                        "version": pkg.get("version", ""),
+                        "severity": cve.get("severity", ""),
+                        "cvss_score": cve.get("cvss_score"),
+                    })
+
+        elapsed = (datetime.now() - started).total_seconds()
+        self.db.log_scan("lxc-local", matches, len(packages), elapsed)
+
+        return {
+            "scan_type": "lxc-local",
+            "packages_checked": len(packages),
+            "cves_matched": matches,
+            "matched_cves": matched_cves,
+            "duration": elapsed,
+        }
+
+    def _get_local_packages(self) -> list[dict[str, str]]:
+        """Enumerate locally installed packages via dpkg-query.
+
+        Returns:
+            List of dicts with 'name' and 'version' keys.
+        """
+        try:
+            result = subprocess.run(
+                ["dpkg-query", "-W", "-f=${Package}\t${Version}\n"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                return []
+
+            packages = []
+            for line in result.stdout.strip().split("\n"):
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    packages.append({"name": parts[0], "version": parts[1]})
+            return packages
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
 
         return {
             "lxc_id": lxc_id,

@@ -49,9 +49,24 @@ def main() -> None:
         # For now, run the scan pipeline with empty packages to establish
         # the scan log entry and fetch new CVEs from NVD.
         result = scanner.scan_host(packages=[])
-        print(f"Scan complete: {result['cves_found']} CVEs found, "
+        print(f"Host scan: {result['cves_found']} CVEs found, "
               f"{result['packages_checked']} packages checked, "
               f"{result['duration']:.1f}s")
+
+        # Local LXC package scan (runs inside the LXC itself)
+        lxc_result = scanner.scan_local_packages(packages=[])
+        print(f"LXC scan: {lxc_result['cves_matched']} CVE matches, "
+              f"{lxc_result['packages_checked']} packages checked, "
+              f"{lxc_result['duration']:.1f}s")
+
+        # Print matched CVEs if any
+        if lxc_result.get("matched_cves"):
+            print("\nMatched CVEs:")
+            for m in lxc_result["matched_cves"][:20]:  # Limit output
+                print(f"  {m['cve_id']} — {m['package']} {m['version']} "
+                      f"({m['severity']}, CVSS {m['cvss_score']})")
+            if len(lxc_result["matched_cves"]) > 20:
+                print(f"  ... and {len(lxc_result['matched_cves']) - 20} more")
     finally:
         scanner.close()
 

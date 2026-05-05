@@ -405,18 +405,48 @@ class SentinelShell:
             # Get host packages if Proxmox is available
             packages = []
             if self.proxmox:
-                packages = self.proxmox.get_host_packages()
+                try:
+                    packages = self.proxmox.get_host_packages()
+                except FileNotFoundError:
+                    # pvesh is only available on the Proxmox host, not in LXCs
+                    self.console.print(
+                        "[dim]Host package scan skipped (pvesh not available in LXC). "
+                        "Local LXC scan will still run.[/dim]"
+                    )
 
             result = scanner.scan_host(packages=packages)
+
+            # Local LXC package scan
+            lxc_result = scanner.scan_local_packages(packages=[])
             scanner.close()
 
             self.console.print(Panel(
-                f"Scan complete in {result['duration']:.1f}s\n"
-                f"CVEs found: {result['cves_found']}\n"
-                f"Packages checked: {result['packages_checked']}",
+                f"Host scan: {result['cves_found']} CVEs, {result['packages_checked']} packages\n"
+                f"LXC scan:  {lxc_result['cves_matched']} matches, {lxc_result['packages_checked']} packages\n"
+                f"Duration:  {result['duration'] + lxc_result['duration']:.1f}s",
                 title="Scan Results",
                 border_style="green",
             ))
+
+            # Show matched CVEs if any
+            if lxc_result.get("matched_cves"):
+                table = Table(title="Matched CVEs (local packages)")
+                table.add_column("CVE ID", width=20)
+                table.add_column("Package", width=16)
+                table.add_column("Version", width=14)
+                table.add_column("Severity", width=10)
+                table.add_column("CVSS", width=6)
+
+                for m in lxc_result["matched_cves"][:20]:
+                    sev = m.get("severity", "UNKNOWN")
+                    color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(sev, "white")
+                    table.add_row(
+                        m["cve_id"], m["package"], m["version"],
+                        Text(sev, style=color), str(m.get("cvss_score", "")),
+                    )
+                self.console.print(table)
+                if len(lxc_result["matched_cves"]) > 20:
+                    self.console.print(f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]")
 
             # LLM summary
             if self.client and result["cves_found"] > 0:

@@ -128,6 +128,12 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS system_snapshot (
+    type TEXT PRIMARY KEY,
+    data TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_cves_severity ON cves(severity);
 CREATE INDEX IF NOT EXISTS idx_cves_package ON cves(affected_package);
 CREATE INDEX IF NOT EXISTS idx_cve_matches_pkg ON cve_matches(package_name);
@@ -354,3 +360,50 @@ class Database:
                 "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
                 (key, value),
             )
+
+    # ── System snapshot operations ─────────────────────────
+
+    def cache_snapshot(self, snap_type: str, data: dict) -> None:
+        """Cache a system snapshot (repos, health, services) as JSON."""
+        import json
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO system_snapshot (type, data, updated_at) "
+                "VALUES (?, ?, datetime('now'))",
+                (snap_type, json.dumps(data)),
+            )
+
+    def get_snapshot(self, snap_type: str) -> Optional[dict]:
+        """Get a cached system snapshot, or None if not found."""
+        import json
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT data, updated_at FROM system_snapshot WHERE type = ?",
+                (snap_type,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "data": json.loads(row["data"]),
+            "updated_at": row["updated_at"],
+        }
+
+    def get_all_snapshots(self) -> dict[str, dict]:
+        """Get all cached snapshots keyed by type."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT type, data, updated_at FROM system_snapshot"
+            ).fetchall()
+        import json
+        result = {}
+        for row in rows:
+            result[row["type"]] = {
+                "data": json.loads(row["data"]),
+                "updated_at": row["updated_at"],
+            }
+        return result
+
+    def clear_snapshots(self) -> None:
+        """Clear all cached snapshots."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM system_snapshot")

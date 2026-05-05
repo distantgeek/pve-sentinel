@@ -13,7 +13,7 @@
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 77 passing (+13 env-gated conversation tests) |
+| Tests | `uv run pytest tests/` — 84 passing (+13 env-gated conversation tests) |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
@@ -108,17 +108,23 @@ Reference data at `src/framework_data/nist_csf_ai.yaml` (full CSF 2.0 structure 
 
 | Command | Description |
 |---------|-------------|
-| `/digest` | Run full CVE scan and LLM summary |
+| `/digest` | Run full CVE scan and LLM summary (caches system context) |
 | `/cve check <pkg>` | Deep-dive a specific package's CVEs |
 | `/cve scan` | Run host-only CVE scan |
+| `/health` | Full hypervisor health dashboard |
+| `/health rrd [period]` | Historical metrics (hour/day/week/month/year) |
+| `/health services` | Proxmox service status |
 | `/status` | Proxmox resource overview (VMs, LXCs, storage) |
+| `/refresh [type]` | Update cached system context (repos/health/services/all) |
 | `/proxmox <action>` | Proxmox API operation (write = confirm required) |
 | `/guardrails [preset]` | Show or switch security framework preset |
 | `/history` | Recent scan history from SQLite |
 | `/help` | Command reference |
 | `/quit` | Exit the shell |
 
-Free-text input is sent directly to the LLM for advisory chat.
+Free-text input is sent directly to the LLM for advisory chat. System context
+(repos, health, services) is cached during `/digest` or `/refresh` and injected
+into every chat message with timestamp attribution.
 
 ## Setup Helper
 

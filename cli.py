@@ -41,6 +41,7 @@ COMMANDS = {
     "/health rrd [period]": "Historical metrics (hour/day/week/month/year)",
     "/health services": "Proxmox service status",
     "/status": "Proxmox resource overview",
+    "/refresh [type]": "Update cached system context (repos/health/services/all)",
     "/proxmox <action>": "Proxmox API operation (write = confirm)",
     "/guardrails [preset]": "Show or switch security framework preset",
     "/history": "Recent scan history",
@@ -229,6 +230,7 @@ class SentinelShell:
             "/history": self._cmd_history,
             "/digest": self._cmd_digest,
             "/health": self._cmd_health,
+            "/refresh": self._cmd_refresh,
             "/guardrails": self._cmd_guardrails,
             "/cve": self._cmd_cve,
             "/proxmox": self._cmd_proxmox,
@@ -250,8 +252,15 @@ class SentinelShell:
             return
 
         try:
+            # Build cached context for the LLM
+            context = self._build_chat_context()
+
             with self.console.status("[cyan]Thinking...[/cyan]"):
-                response = self.client.ask(prompt)
+                if context:
+                    full_prompt = f"{context}\n\nUser: {prompt}"
+                else:
+                    full_prompt = prompt
+                response = self.client.ask(full_prompt)
 
             if response:
                 self.console.print(Markdown(response))
@@ -259,6 +268,48 @@ class SentinelShell:
                 self.console.print("[yellow]No response from model.[/yellow]")
         except Exception as e:
             self.console.print(f"[red]LLM error:[/red] {e}")
+
+    def _build_chat_context(self) -> str:
+        """Build system context string from cached snapshots for chat injection."""
+        snapshots = self.db.get_all_snapshots()
+        if not snapshots:
+            return ""
+
+        parts = []
+        parts.append("System Context (cached from last /digest or /refresh):")
+
+        if "repos" in snapshots:
+            r = snapshots["repos"]["data"]
+            ts = snapshots["repos"]["updated_at"]
+            enabled = [x["name"] for x in r.get("standard_repos", []) if x.get("enabled")]
+            disabled = [x["name"] for x in r.get("standard_repos", []) if not x.get("enabled")]
+            parts.append(
+                f"  Repositories (cached {ts}): enabled={enabled}, "
+                f"disabled={disabled}, warnings={r.get('warnings', [])}, "
+                f"errors={r.get('errors', [])}"
+            )
+
+        if "health" in snapshots:
+            h = snapshots["health"]["data"]
+            ts = snapshots["health"]["updated_at"]
+            parts.append(
+                f"  Health (cached {ts}): CPU {h.get('cpu_pct', '?')}%, "
+                f"RAM {h.get('mem_pct', '?')}%, RootFS {h.get('rootfs_pct', '?')}%, "
+                f"VMs={h.get('vm_count', '?')}, LXCs={h.get('lxc_count', '?')}"
+            )
+
+        if "services" in snapshots:
+            s = snapshots["services"]["data"]
+            ts = snapshots["services"]["updated_at"]
+            svc_list = s.get("services", [])
+            running = sum(1 for sv in svc_list if sv.get("state") == "running")
+            dead = [sv["name"] for sv in svc_list if sv.get("state") == "dead"]
+            parts.append(
+                f"  Services (cached {ts}): {running} running, "
+                f"dead={dead}"
+            )
+
+        return "\n".join(parts)
 
     # ── Command Handlers ───────────────────────────────────────────
 
@@ -414,9 +465,11 @@ class SentinelShell:
             # Get repo status for LLM context
             repo_context = ""
             repo_summary = ""
+            repo_data = None
             if self.proxmox:
                 try:
                     repos = self.proxmox.get_host_repos()
+                    repo_data = repos
                     enabled = [r["name"] for r in repos["standard_repos"] if r["enabled"]]
                     disabled = [r["name"] for r in repos["standard_repos"] if not r["enabled"]]
                     repo_context = (
@@ -432,9 +485,11 @@ class SentinelShell:
 
             # Get health summary for LLM context
             health_context = ""
+            health_data = None
             if self.proxmox:
                 try:
                     h = self.proxmox.get_health()
+                    health_data = h
                     health_context = (
                         f"System Health: CPU {h['cpu_pct']}%, "
                         f"RAM {h['mem_pct']}%, "
@@ -444,6 +499,19 @@ class SentinelShell:
                     )
                 except Exception:
                     health_context = "System Health: unable to query (pending verification)"
+
+            # Cache system snapshots for chat context (zero extra API calls)
+            if self.proxmox:
+                try:
+                    if repo_data:
+                        self.db.cache_snapshot("repos", repo_data)
+                    if health_data:
+                        self.db.cache_snapshot("health", health_data)
+                    services = self.proxmox.get_service_status()
+                    if services:
+                        self.db.cache_snapshot("services", {"services": services})
+                except Exception:
+                    pass  # Cache failure is non-fatal
 
             result = scanner.scan_host(packages=packages)
 
@@ -476,7 +544,46 @@ class SentinelShell:
                         m["cve_id"], m["package"], m["version"],
                         Text(sev, style=color), str(m.get("cvss_score", "")),
                     )
-                self.console.print(table)
+        self.console.print(table)
+
+    def _cmd_refresh(self, parts: list[str]) -> None:
+        """Update cached system context from Proxmox API."""
+        if not self.proxmox:
+            self.console.print("[yellow]Proxmox API not configured.[/yellow]")
+            return
+
+        snap_type = parts[1].lower() if len(parts) >= 2 else "all"
+        valid = {"repos", "health", "services", "all"}
+        if snap_type not in valid:
+            self.console.print(f"[red]Invalid type:[/red] {snap_type}")
+            self.console.print(f"Valid: {', '.join(sorted(valid))}")
+            return
+
+        refreshed = []
+        try:
+            if snap_type in ("repos", "all"):
+                repos = self.proxmox.get_host_repos()
+                self.db.cache_snapshot("repos", repos)
+                refreshed.append("repos")
+
+            if snap_type in ("health", "all"):
+                health = self.proxmox.get_health()
+                self.db.cache_snapshot("health", health)
+                refreshed.append("health")
+
+            if snap_type in ("services", "all"):
+                services = self.proxmox.get_service_status()
+                self.db.cache_snapshot("services", {"services": services})
+                refreshed.append("services")
+
+            self.console.print(f"[green]Cached: {', '.join(refreshed)}[/green]")
+            self.console.print("[dim]Use /digest for full CVE scan + cache update[/dim]")
+        except Exception as e:
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Refresh error:[/red] {e}")
                 if len(lxc_result["matched_cves"]) > 20:
                     self.console.print(f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]")
 

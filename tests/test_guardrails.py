@@ -74,3 +74,5 @@ class TestValidationDirective:
         assert "pveupdate" in VALIDATION_DIRECTIVE
         assert "pve-upgrade" in VALIDATION_DIRECTIVE
         assert "curated package pipeline" in VALIDATION_DIRECTIVE
+        assert "snapshot timestamp" in VALIDATION_DIRECTIVE
+        assert "cached in your conversation" in VALIDATION_DIRECTIVE

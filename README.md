@@ -80,11 +80,12 @@ Key file locations on the LXC:
 ## CLI Commands
 
 ```
-/digest              Run full CVE scan and LLM summary
+/digest              Run full CVE scan and LLM summary (caches system context)
 /cve check <pkg>     Deep-dive a specific package
 /cve scan            Run host-only CVE scan
 /status              Proxmox resource overview
 /health [subcmd]     System health: full, rrd [timeframe], services
+/refresh [type]      Update cached context: repos/health/services/all
 /proxmox <action>    Proxmox API operation (write = confirm required)
 /guardrails [preset] Show or switch security framework preset
 /history             Recent scan history
@@ -92,7 +93,9 @@ Key file locations on the LXC:
 /quit                Exit the shell
 ```
 
-Free-text input is sent directly to the LLM for advisory chat.
+Free-text input is sent directly to the LLM for advisory chat. System context
+(repos, health, services) is cached during `/digest` or `/refresh` and injected
+into every chat message with timestamp attribution.
 
 ## Setup Helper
 
@@ -175,8 +178,8 @@ uv run pytest tests/ -v
 PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 ```
 
-77 standard tests across 8 modules: config, cve_scanner, database, guardrails,
-opencode_client, permission_gate, proxmox_tools, setup.
+84 standard tests across 9 modules: config, cve_scanner, database, guardrails,
+opencode_client, permission_gate, proxmox_tools, setup, snapshot.
 
 Plus 13 conversation tests (env-gated) that verify LLM guardrail compliance:
 no hallucinated commands, no unsolicited tool suggestions, correct verification

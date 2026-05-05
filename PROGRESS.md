@@ -284,3 +284,43 @@ What needs to be built:
 - Standard tests: 77 passing
 - Conversation tests: 13 (env-gated, run with `PVE_SENTINEL_TEST_LLM=1`)
 - Total: 90 tests available (77 standard + 13 conversation)
+
+### 2026-05-05: System Context Caching + /refresh Command ✅ Complete
+
+**Problem: LLM had no awareness of system state between API calls**
+- During free-text chat, LLM couldn't reference repo config, health, or services
+- LLM hallucinated that it had no API access at all (it does — via Python layer)
+- LLM suggested manual curl commands instead of using built-in capabilities
+- Every chat message had zero system context
+
+**System Snapshot Caching (`src/database.py`)**
+- New `system_snapshot` table: stores JSON payloads keyed by type (repos/health/services)
+- `cache_snapshot()`, `get_snapshot()`, `get_all_snapshots()`, `clear_snapshots()` CRUD
+- During `/digest`, all API-fetched data is cached — zero extra API calls
+- Snapshots include `updated_at` timestamp for freshness awareness
+
+**Chat Context Injection (`cli.py`)**
+- `_build_chat_context()` pulls all cached snapshots before every LLM chat message
+- Context includes: repos (enabled/disabled), health (CPU/RAM/RootFS), services (running/dead)
+- Each section includes cache timestamp for LLM to reference ("Based on snapshot from...")
+- ~2ms SQLite read per chat message, zero API overhead
+
+**`/refresh` Command**
+- `/refresh repos` — fetch repo config, update cache
+- `/refresh health` — fetch health metrics, update cache
+- `/refresh services` — fetch service status, update cache
+- `/refresh all` — fetch everything (default)
+- Lightweight alternative to full `/digest` when you just need fresh context
+
+**VALIDATION_DIRECTIVE Update**
+- Added cached context awareness: "System context is cached in your conversation context"
+- Added timestamp attribution: "Always note the snapshot timestamp when referencing data"
+- LLM now knows to say "Based on the snapshot from 2026-05-05T14:32:00Z"
+
+**Tests (`tests/test_snapshot.py`)**
+- 7 new tests: cache/retrieve, missing returns None, overwrite, get_all, clear, complex data, timestamp freshness
+
+**Results**
+- Standard tests: 84 passing (was 77)
+- Zero additional API calls during digest or chat
+- API cost-conscious design: cache once, reference many times

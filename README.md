@@ -12,10 +12,10 @@ infrastructure guidance — with human-in-the-loop permission gating.
 
 - **Interactive CLI** — prompt_toolkit REPL with tab completion, command history,
   and rich output formatting (tables, panels, markdown)
-- **CVE Monitoring** — Multi-source vulnerability intelligence (NVD, MITRE)
-  with daily scheduled scans and on-demand digests
+- **CVE Monitoring** — Multi-source vulnerability intelligence (NVD, MITRE, PVE-SA)
+  with daily scheduled scans and weekly digest reports
 - **Host + LXC Scanning** — Package-level vulnerability detection on both the
-  Proxmox host and all LXC containers via native `pct exec`
+  Proxmox host and all LXC containers via native `pct exec` and local `dpkg-query`
 - **Proxmox-Aware Remediation** — Correlates CVEs against Proxmox's curated
   package repos, never suggests upstream version pinning that could break PVE
 - **LLM Advisory Chat** — GLM-5.1 provides contextual guidance, workarounds,
@@ -24,7 +24,9 @@ infrastructure guidance — with human-in-the-loop permission gating.
   require explicit confirmation; destructive operations require a random token
 - **Security Guardrails** — LLM responses constrained to NIST CSF AI Profile,
   CIS Ubuntu Level 1, or CIS AI Controls Matrix frameworks
-- **Setup Helper** — One-command CA cert installation and connectivity verification
+- **Setup Helper** — CA cert fetch and connectivity verification
+- **SSH MOTD** — Login banner with quick-start commands and file locations
+- **systemd Timers** — Daily CVE scans + weekly digest reports (user-level)
 - **Guest VM Scanning** *(opt-in)* — Vulnerabilities inside VMs via QEMU
   Guest Agent, with multi-method package discovery (dpkg/rpm/apk/flatpak/npm/
   pip/containers)
@@ -45,14 +47,35 @@ cp config.yaml.example config.yaml
 cat > .env << EOF
 OPENCODE_GO_API_KEY=your-key-here
 PROXMOX_TOKEN_VALUE=your-uuid-secret-here
+# Optional: raises NVD API rate limit from 5 to 50 req/6s
+# NVD_API_KEY=your-nvd-key-here
 EOF
 
-# Install Proxmox CA certificate (for SSL verification)
-uv run python -m src.setup cert
+# Verify connectivity
+uv run python -m src.setup verify
 
 # Launch the CLI
 uv run python cli.py
 ```
+
+### On the LXC
+
+SSH into the LXC and the MOTD displays quick-start commands:
+
+```
+  Launch CLI:    cd ~/advisory && uv run python -m cli
+  Quick scan:    cd ~/advisory && uv run python -m src.scanner_cli
+  Setup verify:  cd ~/advisory && uv run python -m src.setup verify
+```
+
+Key file locations on the LXC:
+
+| Path | Purpose |
+|------|---------|
+| `~/advisory/config.yaml` | Main configuration |
+| `~/advisory/.env` | API keys and tokens |
+| `~/advisory/sentinel.db` | SQLite CVE database |
+| `~/.config/systemd/user/cve-*.timer` | Scheduled scan timers |
 
 ## CLI Commands
 
@@ -73,13 +96,16 @@ Free-text input is sent directly to the LLM for advisory chat.
 ## Setup Helper
 
 ```bash
-uv run python -m src.setup cert      # Install Proxmox CA cert to trust store
+uv run python -m src.setup cert      # Fetch Proxmox CA cert (user-level)
 uv run python -m src.setup verify    # Test Proxmox API + LLM connectivity
 ```
 
-The `cert` command fetches the Proxmox root CA certificate via the TLS handshake
-on port 8006 and installs it to the system trust store. If run as a non-root user,
-it displays the exact sudo command needed.
+The `cert` command fetches the Proxmox root CA certificate via `openssl s_client`
+and saves it to `~/.local/share/ca-certificates/pve-root-ca.crt`.
+
+**Note:** Do NOT set `SSL_CERT_FILE` to this file — it contains only the Proxmox
+CA and will break external HTTPS (NVD, MITRE). For homelab environments, set
+`verify_ssl: false` in `config.yaml` instead.
 
 ## Architecture
 
@@ -87,9 +113,11 @@ it displays the exact sudo command needed.
 LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
 ├── OpenCode Go REST API → GLM-5.1 (direct HTTPS, no local server)
 ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
-├── SQLite               → CVE database, package inventory (12 tables)
+├── CVE sources          → NVD API, MITRE CVE, PVE-SA wiki feed
+├── SQLite               → CVE database, package inventory, advisories (12 tables)
 ├── .env                 → API keys, tokens (auto-loaded via dotenv)
-└── systemd timers       → Daily scans, weekly digests
+├── systemd timers       → Daily scans (00:06), weekly digests (Mon 08:00)
+└── MOTD                 → SSH login banner with quick-start commands
 ```
 
 ## Security Guardrails

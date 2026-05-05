@@ -9,7 +9,7 @@
 |------|-------|
 | LXC | 101, Debian 13, 192.168.2.5, 4C/8GB/32GB |
 | Proxmox host | kevbot-pve, 192.168.2.146 |
-| SSH | `ssh -i ~/.ssh/id_ed25519_proxmox kevbot@192.168.2.5` |
+| SSH | `ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5` |
 | LLM | GLM-5.1 via OpenCode Go REST API |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
@@ -17,7 +17,7 @@
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
-| Version | 0.2.0 |
+| Version | 0.3.0 |
 
 ## Architecture
 
@@ -28,13 +28,13 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 │   https://opencode.ai/zen/go/v1                           │
 │   Model: glm-5.1                                          │
 ├─────────────────────────────────────────────────────────┤
-│ Python orchestrator (uv + Python 3.12/3.14)              │
+│ Python orchestrator (uv + Python 3.13)                   │
 │   cli.py              Interactive REPL (prompt_toolkit)  │
 │   src/config.py        YAML config + dotenv + env resolve│
 │   src/database.py      SQLite schema + CRUD (12 tables)  │
 │   src/opencode_client.py  Direct API client (httpx)     │
 │   src/guardrails.py    Security framework presets        │
-│   src/cve_scanner.py   NVD+MITRE pipeline (httpx)        │
+│   src/cve_scanner.py   NVD+MITRE+PVE-SA pipeline (httpx) │
 │   src/proxmox_tools.py proxmoxer + pvesh wrapper         │
 │   src/permission_gate.py Read/write/destroy + secrets    │
 │   src/setup.py         Setup helper (cert, verify)       │
@@ -43,7 +43,8 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 ├─────────────────────────────────────────────────────────┤
 │ SQLite: sentinel.db (12 tables, 9 indexes, mode=0o700)  │
 │ .env file: API keys, tokens (auto-loaded via dotenv)    │
-│ systemd timers: cve-scanner + cve-digest                │
+│ systemd timers: cve-scanner (daily) + cve-digest (weekly│
+│ MOTD: /etc/update-motd.d/50-sentinel (SSH login banner) │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -58,7 +59,7 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 | 3 | Core CLI (interactive shell) | ✅ complete |
 | 4 | Permission gates (confirm/CONFIRM-XXXXXX) | ✅ complete |
 | 4.5 | Dotenv support + SSL error handling + setup helper | ✅ complete |
-| 5 | Host + LXC CVE monitoring | 🔜 next |
+| 5 | Host + LXC CVE monitoring | ✅ complete |
 | 6 | OpenAI-compatible API → Open WebUI | deferred |
 | 7 | Guest VM scanning (QEMU agent) | deferred |
 | 8 | Community Scripts installer | deferred |
@@ -100,14 +101,34 @@ Free-text input is sent directly to the LLM for advisory chat.
 ## Setup Helper
 
 ```bash
-uv run python -m src.setup cert      # Install Proxmox CA cert to trust store
+uv run python -m src.setup cert      # Fetch Proxmox CA cert (user-level)
 uv run python -m src.setup verify    # Test Proxmox API + LLM connectivity
 uv run python -m src.setup wizard    # Interactive setup (future)
 ```
 
-The `cert` command fetches the Proxmox CA cert via `openssl s_client` and installs it to the user-level trust store.
-extracts the root CA cert from the chain, and installs it via `update-ca-certificates`.
-If run as non-root, it displays the exact sudo command needed.
+The `cert` command fetches the Proxmox CA cert via `openssl s_client` and saves it
+to `~/.local/share/ca-certificates/pve-root-ca.crt`. Note: this does NOT set
+`SSL_CERT_FILE` — doing so would break external HTTPS (NVD, MITRE). For homelab
+use, set `verify_ssl: false` in `config.yaml` instead.
+
+## SSH Login MOTD
+
+On SSH login to the LXC, a MOTD banner displays quick-start commands and file locations:
+
+```
+  Launch CLI:    cd ~/advisory && uv run python -m cli
+  Quick scan:    cd ~/advisory && uv run python -m src.scanner_cli
+  Setup verify:  cd ~/advisory && uv run python -m src.setup verify
+
+  Key files:
+    Config:      ~/advisory/config.yaml
+    Secrets:     ~/advisory/.env
+    Database:    ~/advisory/sentinel.db
+    Timers:      ~/.config/systemd/user/cve-*.timer
+```
+
+MOTD source: `/etc/update-motd.d/50-sentinel` (requires root to edit).
+Profile.d fallback: `/etc/profile.d/pve-sentinel.sh`.
 
 ## Key Design Decisions
 
@@ -119,7 +140,8 @@ If run as non-root, it displays the exact sudo command needed.
 6. **httpx only** — Single HTTP library (removed requests dependency).
 7. **CIS L1 alignment** — verify_ssl=True, secrets module for tokens, restricted DB dir (0o700), least-privilege deny_always.
 8. **python-dotenv** — `.env` file auto-loaded regardless of shell context.
-9. **SSL Option B as default** — Install Proxmox CA cert instead of disabling verification.
+9. **No SSL_CERT_FILE override** — Setting it to Proxmox-only CA breaks external HTTPS (NVD, MITRE). Use `verify_ssl: false` for Proxmox instead.
+10. **SSH key separation** — `id_ed25519_pve-sentinel` for LXC access, `id_ed25519_proxmox` for Proxmox host.
 
 ## Security Hardening (Phase 0)
 
@@ -161,7 +183,7 @@ cd /var/home/kevbot/pve-sentinel
 uv run pytest tests/ -v
 
 # On LXC:
-ssh -i ~/.ssh/id_ed25519_proxmox kevbot@192.168.2.5
+ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5
 cd advisory
 uv run pytest tests/ -v
 ```
@@ -175,8 +197,8 @@ tar czf /tmp/pve-sentinel-update.tar.gz \
   --exclude='.pytest_cache' --exclude='sentinel.db' \
   . 2>/dev/null
 cat /tmp/pve-sentinel-update.tar.gz | \
-  ssh -i ~/.ssh/id_ed25519_proxmox root@192.168.2.5 \
-  'cd /home/kevbot/advisory && tar xzf - && chown -R kevbot:kevbot .'
+  ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5 \
+  'cd advisory && tar xzf -'
 ```
 
 ## File Inventory
@@ -188,17 +210,31 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `src/database.py` | SQLite 12-table schema, CRUD, WAL mode, 0o700 dir | ✅ Hardened |
 | `src/opencode_client.py` | Direct REST API client, context manager, cached guardrails | ✅ Hardened |
 | `src/guardrails.py` | 4 presets + custom, system prompt injection | ✅ Complete |
-| `src/cve_scanner.py` | NVD+MITRE pipeline, httpx, priority matrix | ✅ Hardened |
+| `src/cve_scanner.py` | NVD+MITRE+PVE-SA pipeline, httpx, priority matrix, local pkg scan | ✅ Phase 5 |
 | `src/proxmox_tools.py` | proxmoxer wrapper, pvesh, path gating, verify_ssl=True | ✅ Hardened |
 | `src/permission_gate.py` | READ/WRITE/DESTRUCTIVE, secrets.choice, DENY_ALWAYS | ✅ Hardened |
-| `src/setup.py` | Setup helper: cert install, connectivity verify | ✅ New (Phase 4.5) |
-| `src/scanner_cli.py` | systemd timer entry point | ✅ Complete |
+| `src/setup.py` | Setup helper: cert fetch, connectivity verify | ✅ Phase 4.5 |
+| `src/scanner_cli.py` | systemd timer entry point, host + local LXC scan | ✅ Phase 5 |
 | `src/framework_data/nist_csf_ai.yaml` | NIST CSF 2.0 + AI considerations | ✅ Complete |
 | `config.yaml.example` | Anonymized configuration template | ✅ Updated |
-| `systemd/cve-scanner.service` | Timer service (proper script entry point) | ✅ Fixed |
-| `systemd/cve-scanner.timer` | Daily scan timer | ✅ Fixed |
-| `systemd/cve-digest.timer` | Weekly digest timer | ✅ Fixed |
+| `systemd/cve-scanner.service` | Daily scan service (EnvironmentFile=.env) | ✅ Phase 5 |
+| `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
+| `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |
+| `systemd/cve-digest.timer` | Weekly digest timer (Mon 08:00 UTC) | ✅ Phase 5 |
 | `tests/` | 62 tests across 7 modules | ✅ Complete |
+
+## On-LXC File Locations
+
+| Path | Purpose |
+|------|---------|
+| `~/advisory/config.yaml` | Main configuration (edit for Proxmox host, guardrails, CVE sources) |
+| `~/advisory/.env` | Secrets: `OPENCODE_GO_API_KEY`, `PROXMOX_TOKEN_VALUE`, optional `NVD_API_KEY` |
+| `~/advisory/sentinel.db` | SQLite database (CVEs, scans, advisories, matches) |
+| `~/advisory/.venv/` | uv-managed Python virtual environment |
+| `~/.config/systemd/user/cve-*.timer` | systemd user timers (scan + digest) |
+| `~/.local/share/pve-sentinel/` | CLI history, logs |
+| `/etc/update-motd.d/50-sentinel` | SSH login MOTD banner (root to edit) |
+| `/etc/profile.d/pve-sentinel.sh` | Interactive shell quick-reference (root to edit) |
 
 ## SSL Verification Note
 

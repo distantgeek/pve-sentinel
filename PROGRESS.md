@@ -175,3 +175,15 @@ What needs to be built:
   — confirmed via `openssl x509 -text`. Env var ordering irrelevant; cert itself is
   invalid by modern X.509 standards. `verify_ssl: false` is the practical workaround.
 - Updated `AGENTS.md`, `PROGRESS.md` with SSL limitation documentation
+
+### 2026-05-05: Phase 5 — Host + LXC CVE Monitoring ✅ Complete
+
+- **NVD API key support**: `NVD_API_KEY` env var, raises rate limit from 5 to 50 req/6s
+- **PVE-SA feed parser**: `fetch_pve_advisories()` scrapes Proxmox wiki, `sync_pve_advisories()` populates local DB
+- **Local LXC package scanning**: `scan_local_packages()` auto-detects via `dpkg-query`, cross-references 90-day CVE DB
+- **systemd timers**: `cve-scanner.timer` (daily 00:06 UTC), `cve-digest.timer` (weekly Mon 08:00 UTC)
+- **MOTD banner**: `/etc/update-motd.d/50-sentinel` shows CLI commands + file locations on SSH login
+- **Profile.d fallback**: `/etc/profile.d/pve-sentinel.sh` for interactive shells
+- **SSL fix**: Removed `SSL_CERT_FILE` from `.env` — it was breaking external HTTPS
+- Scanner runs: 213 CVEs fetched, 285 local packages checked, 0 matches (clean LXC)
+- Version bumped to 0.3.0

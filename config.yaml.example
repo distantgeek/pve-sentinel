@@ -3,10 +3,12 @@
 
 # ── Model ──────────────────────────────────────────────────
 model:
-  # Provider: opencode-go, openai, anthropic, google, ollama, or custom
+  # Provider: opencode-go (paid) | opencode-zen (free tier)
   provider: opencode-go
   
-  # Model ID (GLM-5.1 strongly recommended for advisory tasks)
+  # Model ID — default per provider:
+  #   opencode-go: glm-5.1 (recommended for advisory tasks)
+  #   opencode-zen: glm-4 (free tier)
   model_id: glm-5.1
   
   # For non-OpenCode providers, uncomment:

@@ -84,6 +84,7 @@ Key file locations on the LXC:
 /cve check <pkg>     Deep-dive a specific package
 /cve scan            Run host-only CVE scan
 /status              Proxmox resource overview
+/health [subcmd]     System health: full, rrd [timeframe], services
 /proxmox <action>    Proxmox API operation (write = confirm required)
 /guardrails [preset] Show or switch security framework preset
 /history             Recent scan history
@@ -155,12 +156,12 @@ guardrails:
 
 ## Model Configuration
 
-Default: GLM-5.1 via OpenCode Go. Configurable via `config.yaml`:
+Default: GLM-5.1 via OpenCode Go (paid). OpenCode Zen (free tier, GLM-4) also supported:
 
 ```yaml
 model:
-  provider: opencode-go
-  model_id: glm-5.1
+  provider: opencode-go    # or opencode-zen for free tier
+  model_id: glm-5.1        # glm-4 for zen
   # Alternatives: openai, anthropic, google, ollama, or custom OpenAI-compatible API
 ```
 
@@ -170,7 +171,7 @@ model:
 uv run pytest tests/ -v
 ```
 
-68 tests across 8 modules: config, cve_scanner, database, guardrails,
+77 tests across 8 modules: config, cve_scanner, database, guardrails,
 opencode_client, permission_gate, proxmox_tools, setup.
 
 ## License

@@ -37,6 +37,9 @@ COMMANDS = {
     "/digest": "Run full CVE scan and LLM summary",
     "/cve check <pkg>": "Deep-dive a specific package",
     "/cve scan": "Run host-only CVE scan",
+    "/health": "Full hypervisor health dashboard",
+    "/health rrd [period]": "Historical metrics (hour/day/week/month/year)",
+    "/health services": "Proxmox service status",
     "/status": "Proxmox resource overview",
     "/proxmox <action>": "Proxmox API operation (write = confirm)",
     "/guardrails [preset]": "Show or switch security framework preset",
@@ -225,6 +228,7 @@ class SentinelShell:
             "/status": self._cmd_status,
             "/history": self._cmd_history,
             "/digest": self._cmd_digest,
+            "/health": self._cmd_health,
             "/guardrails": self._cmd_guardrails,
             "/cve": self._cmd_cve,
             "/proxmox": self._cmd_proxmox,
@@ -426,6 +430,21 @@ class SentinelShell:
                 except Exception:
                     repo_context = "APT Repositories: unable to query (pending verification)"
 
+            # Get health summary for LLM context
+            health_context = ""
+            if self.proxmox:
+                try:
+                    h = self.proxmox.get_health()
+                    health_context = (
+                        f"System Health: CPU {h['cpu_pct']}%, "
+                        f"RAM {h['mem_pct']}%, "
+                        f"RootFS {h['rootfs_pct']}%, "
+                        f"Storage: {', '.join(s['name'] + ' ' + str(s['pct']) + '%' for s in h['storage'])}, "
+                        f"Disks: {len(h['disks'])} {'PASSED' if all(d['health'] == 'PASSED' for d in h['disks']) else 'ISSUE'}"
+                    )
+                except Exception:
+                    health_context = "System Health: unable to query (pending verification)"
+
             result = scanner.scan_host(packages=packages)
 
             # Local LXC package scan
@@ -472,6 +491,8 @@ class SentinelShell:
                     )
                     if repo_context:
                         summary_prompt += f"\n\nSystem context:\n{repo_context}"
+                    if health_context:
+                        summary_prompt += f"\n{health_context}"
                     summary = self.client.ask(summary_prompt)
                 if summary:
                     self.console.print(Markdown(summary))
@@ -626,6 +647,229 @@ class SentinelShell:
                 self.console.print(_ssl_error_panel(e))
             else:
                 self.console.print(f"[red]Proxmox error:[/red] {e}")
+
+    # ── Health Command ─────────────────────────────────────────────
+
+    def _cmd_health(self, parts: list[str]) -> None:
+        """Hypervisor health dashboard."""
+        if not self.proxmox:
+            self.console.print("[yellow]Proxmox API not configured.[/yellow]")
+            return
+
+        if len(parts) >= 2:
+            subcmd = parts[1].lower()
+            if subcmd == "rrd":
+                self._health_rrd(parts[2:] if len(parts) > 2 else [])
+            elif subcmd == "services":
+                self._health_services()
+            else:
+                self.console.print(f"[red]Unknown subcommand:[/red] {subcmd}")
+                self.console.print("Usage: /health [rrd [period]|services]")
+            return
+
+        self._health_dashboard()
+
+    def _health_dashboard(self) -> None:
+        """Full hypervisor health dashboard."""
+        try:
+            health = self.proxmox.get_health()
+        except Exception as e:
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Health error:[/red] {e}")
+            return
+
+        # Helper functions
+        def pct_color(pct: float, yellow: float, red: float) -> str:
+            if pct >= red:
+                return f"[red]{pct:.1f}%[/red]"
+            if pct >= yellow:
+                return f"[yellow]{pct:.1f}%[/yellow]"
+            return f"[green]{pct:.1f}%[/green]"
+
+        def fmt_bytes(b: int) -> str:
+            if b >= 1024**4:
+                return f"{b / 1024**4:.1f}T"
+            if b >= 1024**3:
+                return f"{b / 1024**3:.1f}G"
+            if b >= 1024**2:
+                return f"{b / 1024**2:.1f}M"
+            return f"{b}B"
+
+        def fmt_uptime(seconds: int) -> str:
+            days = seconds // 86400
+            hours = (seconds % 86400) // 3600
+            mins = (seconds % 3600) // 60
+            if days > 0:
+                return f"{days}d {hours}h {mins}m"
+            return f"{hours}h {mins}m"
+
+        # Build panel content
+        lines = []
+        lines.append(f"Node: [bold]{health['node']}[/bold]  |  {health.get('pveversion', '')}")
+        lines.append(f"Kernel: {health.get('kernel', '')}  |  Uptime: {fmt_uptime(health.get('uptime', 0))}")
+        lines.append("")
+
+        # CPU
+        load = health.get("loadavg", ["", "", ""])
+        lines.append(
+            f"CPU:  {pct_color(health['cpu_pct'], 80, 95)} "
+            f"({health['cpu_cores']} cores, {health['cpu_sockets']} sockets)  "
+            f"Load: {load[0]} {load[1]} {load[2]}"
+        )
+
+        # Memory
+        lines.append(
+            f"RAM:  {fmt_bytes(health['mem_used'])} / {fmt_bytes(health['mem_total'])} "
+            f"({pct_color(health['mem_pct'], 80, 95)})  "
+            f"Available: {fmt_bytes(health['mem_available'])}"
+        )
+
+        # Swap
+        if health["swap_total"] > 0:
+            lines.append(
+                f"Swap: {fmt_bytes(health['swap_used'])} / {fmt_bytes(health['swap_total'])} "
+                f"({pct_color(health['swap_pct'], 50, 80)})"
+            )
+
+        # RootFS
+        lines.append(
+            f"Root: {fmt_bytes(health['rootfs_used'])} / {fmt_bytes(health['rootfs_total'])} "
+            f"({pct_color(health['rootfs_pct'], 70, 90)})"
+        )
+
+        # Storage
+        if health["storage"]:
+            lines.append("")
+            lines.append("Storage:")
+            for s in health["storage"]:
+                lines.append(
+                    f"  {s['name']:12s} {s['type']:6s} "
+                    f"{fmt_bytes(s['used'])} / {fmt_bytes(s['total'])} "
+                    f"({pct_color(s['pct'], 75, 90)})"
+                )
+
+        # Disks
+        if health["disks"]:
+            lines.append("")
+            lines.append("Disks:")
+            for d in health["disks"]:
+                health_color = "green" if d["health"] == "PASSED" else "red"
+                lines.append(
+                    f"  {d['devpath']} — {d['model']} — {d['size_gb']}GB — "
+                    f"[{health_color}]{d['health']}[/{health_color}]"
+                )
+
+        # Temperature
+        temp = health.get("temperature")
+        lines.append("")
+        if temp and isinstance(temp, dict):
+            temp_parts = []
+            for k, v in temp.items():
+                if isinstance(v, (int, float)):
+                    temp_parts.append(f"{k}: {v}°C")
+                else:
+                    temp_parts.append(f"{k}: {v}")
+            lines.append(f"Temperature: {', '.join(temp_parts)}")
+        else:
+            lines.append(
+                "Temperature: N/A — install lm-sensors + "
+                "[link=https://github.com/alexleigh/pve-mods]pve-mods[/link] patch"
+            )
+
+        # Service summary
+        running = sum(1 for s in health["services"] if s["state"] == "running")
+        dead = sum(1 for s in health["services"] if s["state"] == "dead")
+        total = len(health["services"])
+        lines.append("")
+        lines.append(f"Services: {running} running, {dead} dead, {total} total")
+
+        # VM/LXC counts
+        lines.append(f"Guests: {health['vm_count']} VMs, {health['lxc_count']} LXCs")
+
+        self.console.print(Panel(
+            "\n".join(lines),
+            title="Proxmox Health",
+            border_style="cyan",
+        ))
+
+    def _health_rrd(self, args: list[str]) -> None:
+        """Historical metrics from RRD."""
+        timeframe = args[0].lower() if args else "day"
+        valid = {"hour", "day", "week", "month", "year"}
+        if timeframe not in valid:
+            self.console.print(f"[red]Invalid timeframe:[/red] {timeframe}")
+            self.console.print(f"Valid: {', '.join(sorted(valid))}")
+            return
+
+        try:
+            data = self.proxmox.get_rrd_metrics(timeframe=timeframe)
+        except Exception as e:
+            self.console.print(f"[red]RRD error:[/red] {e}")
+            return
+
+        if not data:
+            self.console.print("[dim]No RRD data available.[/dim]")
+            return
+
+        # Show latest values in a table
+        latest = data[-1]
+        table = Table(title=f"RRD Metrics — {timeframe} (latest of {len(data)} points)")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value")
+
+        metrics = [
+            ("CPU", f"{latest.get('cpu', 0) * 100:.1f}%"),
+            ("Memory Used", f"{latest.get('memused', 0) / 1024**3:.1f}G"),
+            ("Memory Total", f"{latest.get('memtotal', 0) / 1024**3:.1f}G"),
+            ("Memory Available", f"{latest.get('memavailable', 0) / 1024**3:.1f}G"),
+            ("Swap Used", f"{latest.get('swapused', 0) / 1024**3:.1f}G"),
+            ("Root Used", f"{latest.get('rootused', 0) / 1024**3:.1f}G"),
+            ("Root Total", f"{latest.get('roottotal', 0) / 1024**3:.1f}G"),
+            ("Net In", f"{latest.get('netin', 0) / 1024:.1f} KB/s"),
+            ("Net Out", f"{latest.get('netout', 0) / 1024:.1f} KB/s"),
+            ("Load Avg", f"{latest.get('loadavg', 0):.2f}"),
+            ("I/O Wait", f"{latest.get('iowait', 0) * 100:.4f}%"),
+        ]
+        for name, value in metrics:
+            table.add_row(name, value)
+
+        self.console.print(table)
+
+    def _health_services(self) -> None:
+        """All Proxmox services with status."""
+        try:
+            services = self.proxmox.get_service_status()
+        except Exception as e:
+            self.console.print(f"[red]Services error:[/red] {e}")
+            return
+
+        table = Table(title="Proxmox Services")
+        table.add_column("Service", style="cyan")
+        table.add_column("State", width=10)
+
+        # Known expected-dead services (single-node, no HA)
+        expected_dead = {
+            "corosync", "pve-ha-crm", "pve-ha-lrm",
+            "syslog", "systemd-timesyncd",
+        }
+
+        for s in sorted(services, key=lambda x: x["name"]):
+            state = s["state"]
+            if state == "running":
+                state_str = "[green]running[/green]"
+            elif state == "dead":
+                if s["name"] in expected_dead:
+                    state_str = "[dim]dead (expected)[/dim]"
+                else:
+                    state_str = "[yellow]dead[/yellow]"
+            else:
+                state_str = state
+            table.add_row(s["name"], state_str)
+
+        self.console.print(table)
 
 
 # ── Entry Point ────────────────────────────────────────────────────

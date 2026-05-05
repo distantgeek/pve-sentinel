@@ -10,10 +10,10 @@
 | LXC | 101, Debian 13, 192.168.2.5, 4C/8GB/32GB |
 | Proxmox host | kevbot-pve, 192.168.2.146 |
 | SSH | `ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5` |
-| LLM | GLM-5.1 via OpenCode Go REST API |
+| LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 68 passing |
+| Tests | `uv run pytest tests/` — 77 passing |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |

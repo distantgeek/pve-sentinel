@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from src.opencode_client import OPENCODE_GO_BASE, OpenCodeClient
+from src.opencode_client import DEFAULT_MODELS, OPENCODE_GO_BASE, OpenCodeClient
 
 
 class TestOpenCodeClientInit:
@@ -148,3 +148,55 @@ class TestOpenCodeClientContextManager:
             with OpenCodeClient() as client:
                 pass
             mock_client.close.assert_called_once()
+
+
+class TestOpenCodeClientZenProvider:
+    def test_zen_provider_sets_correct_base_url(self):
+        """Zen provider uses the free tier base URL."""
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(provider="opencode-zen")
+            assert str(client._client.base_url).rstrip("/") == "https://zen.opencode.ai/v1"
+
+    def test_zen_provider_default_model(self):
+        """Zen provider defaults to glm-4."""
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(provider="opencode-zen")
+            assert client.model == "glm-4"
+
+    def test_zen_provider_custom_model(self):
+        """Zen provider accepts custom model override."""
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(provider="opencode-zen", model="qwen3-235b")
+            assert client.model == "qwen3-235b"
+
+    def test_default_provider_is_opencode_go(self):
+        """Default provider is opencode-go with glm-5.1."""
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient()
+            assert client.provider == "opencode-go"
+            assert client.model == "glm-5.1"
+            assert str(client._client.base_url).rstrip("/") == OPENCODE_GO_BASE
+
+    def test_default_models_dict(self):
+        """DEFAULT_MODELS contains expected provider defaults."""
+        assert DEFAULT_MODELS["opencode-go"] == "glm-5.1"
+        assert DEFAULT_MODELS["opencode-zen"] == "glm-4"
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_zen_provider_ask_works(self, mock_client_cls):
+        """Zen provider ask endpoint works identically."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Zen response"}}]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_client = MagicMock()
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value = mock_client
+
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(provider="opencode-zen")
+            result = client.ask("test")
+            assert result == "Zen response"
+            call_args = mock_client.post.call_args
+            assert call_args[1]["json"]["model"] == "glm-4"

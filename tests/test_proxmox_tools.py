@@ -202,3 +202,84 @@ class TestProxmoxToolsGetHostRepos:
         assert len(repos["warnings"]) == 1
         assert repos["warnings"][0] == "old suite configured"
         assert repos["errors"] == []
+
+
+class TestProxmoxToolsGetHealth:
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_returns_health_dict(self, mock_api):
+        """get_health returns structured health data."""
+        mock_instance = MagicMock()
+        mock_instance.nodes.get.return_value = [{"node": "pve1"}]
+        mock_instance.nodes.return_value.status.get.return_value = {
+            "cpu": 0.05,
+            "memory": {"used": 4000000000, "total": 16000000000, "available": 12000000000},
+            "swap": {"used": 0, "total": 8000000000},
+            "rootfs": {"used": 20000000000, "total": 100000000000},
+            "uptime": 86400,
+            "kversion": "Linux 6.17.9-1-pve",
+            "loadavg": ["0.1", "0.2", "0.3"],
+            "cpuinfo": {"cores": 8, "sockets": 1},
+            "pveversion": "pve-manager/9.1.6",
+        }
+        mock_instance.nodes.return_value.storage.get.return_value = []
+        mock_instance.nodes.return_value.disks.list.get.return_value = []
+        mock_instance.nodes.return_value.services.get.return_value = []
+        mock_instance.cluster.resources.get.return_value = []
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(
+            host="h", user="u", token_name="t", token_value="v"
+        )
+        health = tools.get_health()
+
+        assert health["node"] == "pve1"
+        assert health["cpu_pct"] == 5.0
+        assert health["mem_pct"] == 25.0
+        assert health["rootfs_pct"] == 20.0
+        assert health["vm_count"] == 0
+        assert health["lxc_count"] == 0
+
+
+class TestProxmoxToolsGetRRDMetrics:
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_returns_rrd_data(self, mock_api):
+        """get_rrd_metrics returns historical data points."""
+        mock_instance = MagicMock()
+        mock_instance.nodes.get.return_value = [{"node": "pve1"}]
+        mock_instance.nodes.return_value.rrddata.get.return_value = [
+            {"time": 1000, "cpu": 0.1, "memused": 4000000000},
+            {"time": 1060, "cpu": 0.2, "memused": 4100000000},
+        ]
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(
+            host="h", user="u", token_name="t", token_value="v"
+        )
+        data = tools.get_rrd_metrics(timeframe="hour")
+
+        assert len(data) == 2
+        assert data[0]["cpu"] == 0.1
+
+
+class TestProxmoxToolsGetServiceStatus:
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_returns_service_list(self, mock_api):
+        """get_service_status returns list of services with state."""
+        mock_instance = MagicMock()
+        mock_instance.nodes.get.return_value = [{"node": "pve1"}]
+        mock_instance.nodes.return_value.services.get.return_value = [
+            {"name": "pveproxy", "state": "running"},
+            {"name": "corosync", "state": "dead"},
+        ]
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(
+            host="h", user="u", token_name="t", token_value="v"
+        )
+        services = tools.get_service_status()
+
+        assert len(services) == 2
+        assert services[0]["name"] == "pveproxy"
+        assert services[0]["state"] == "running"
+        assert services[1]["name"] == "corosync"
+        assert services[1]["state"] == "dead"

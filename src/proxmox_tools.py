@@ -114,6 +114,125 @@ class ProxmoxTools:
         node = self._get_node()
         return self.api.nodes(node).lxc(vmid).status.current.get()
 
+    def get_health(self) -> dict[str, Any]:
+        """Full hypervisor health snapshot.
+
+        Combines status, storage, disk health, services, and cluster resources
+        into a single health report. Temperature data is included if the
+        proxmox-temperature patch is installed (via lm-sensors).
+        """
+        node = self._get_node()
+
+        # Node status (CPU, memory, swap, rootfs, uptime, kernel, loadavg)
+        status = self.api.nodes(node).status.get()
+
+        # Storage pools
+        storage = self.api.nodes(node).storage.get()
+
+        # Disk health
+        disks = []
+        try:
+            disk_list = self.api.nodes(node).disks.list.get()
+            for d in disk_list:
+                disks.append({
+                    "devpath": d.get("devpath", ""),
+                    "model": d.get("model", ""),
+                    "size_gb": d.get("size", 0) // 1024**3,
+                    "health": d.get("health", "unknown"),
+                })
+        except Exception:
+            pass  # Disk listing may require elevated permissions
+
+        # Services
+        services = []
+        try:
+            svc_list = self.api.nodes(node).services.get()
+            for s in svc_list:
+                services.append({
+                    "name": s.get("name", ""),
+                    "state": s.get("state", "unknown"),
+                })
+        except Exception:
+            pass
+
+        # Cluster resources (VM/LXC counts)
+        vm_count = 0
+        lxc_count = 0
+        try:
+            resources = self.api.cluster.resources.get()
+            for r in resources:
+                if r.get("type") == "qemu":
+                    vm_count += 1
+                elif r.get("type") == "lxc":
+                    lxc_count += 1
+        except Exception:
+            pass
+
+        # Temperature (if proxmox-temperature patch is installed)
+        temperature = status.get("temperature")
+
+        cpu_info = status.get("cpuinfo", {})
+        mem = status.get("memory", {})
+        swap = status.get("swap", {})
+        rootfs = status.get("rootfs", {})
+
+        return {
+            "node": node,
+            "pveversion": status.get("pveversion", ""),
+            "kernel": status.get("kversion", ""),
+            "uptime": status.get("uptime", 0),
+            "cpu_pct": round(status.get("cpu", 0) * 100, 1),
+            "cpu_cores": cpu_info.get("cores", 0),
+            "cpu_sockets": cpu_info.get("sockets", 0),
+            "loadavg": status.get("loadavg", ["", "", ""]),
+            "mem_used": mem.get("used", 0),
+            "mem_total": mem.get("total", 1),
+            "mem_pct": round(mem.get("used", 0) / max(mem.get("total", 1), 1) * 100, 1),
+            "mem_available": mem.get("available", 0),
+            "swap_used": swap.get("used", 0),
+            "swap_total": swap.get("total", 0),
+            "swap_pct": round(swap.get("used", 0) / max(swap.get("total", 1), 1) * 100, 1),
+            "rootfs_used": rootfs.get("used", 0),
+            "rootfs_total": rootfs.get("total", 1),
+            "rootfs_pct": round(rootfs.get("used", 0) / max(rootfs.get("total", 1), 1) * 100, 1),
+            "storage": [
+                {
+                    "name": s.get("storage", ""),
+                    "type": s.get("type", ""),
+                    "used": s.get("used", 0),
+                    "total": s.get("total", 0),
+                    "pct": round(s.get("used", 0) / max(s.get("total", 1), 1) * 100, 1),
+                }
+                for s in storage
+            ],
+            "disks": disks,
+            "services": services,
+            "vm_count": vm_count,
+            "lxc_count": lxc_count,
+            "temperature": temperature,
+        }
+
+    def get_rrd_metrics(self, timeframe: str = "day") -> list[dict[str, Any]]:
+        """Historical metrics from Proxmox RRD.
+
+        Args:
+            timeframe: hour, day, week, month, or year.
+
+        Returns:
+            List of data points with cpu, memused, netin, netout, iowait, etc.
+        """
+        node = self._get_node()
+        return self.api.nodes(node).rrddata.get(timeframe=timeframe)
+
+    def get_service_status(self) -> list[dict[str, Any]]:
+        """All Proxmox services with running/dead state."""
+        node = self._get_node()
+        services = self.api.nodes(node).services.get()
+        return [
+            {"name": s.get("name", ""), "state": s.get("state", "unknown")}
+            for s in services
+        ]
+
     def get_host_packages(self) -> list[dict[str, str]]:
         """Get installed packages on the Proxmox host via API.
 

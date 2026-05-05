@@ -222,3 +222,33 @@ What needs to be built:
 - Scan results: 30 CVEs across 59 host packages, 0 matches across 285 LXC packages
 - Version bumped to 0.4.0
 - Tests: 68 passing (was 62)
+
+### 2026-05-05: Phase 6 — `/health` Command + OpenCode Zen + Known API Gaps ✅ Complete
+
+**`/health` Command**
+- New `/health` command with subcommands: `full`, `rrd [timeframe]`, `services`
+- `full`: CPU, RAM, RootFS, storage pools, S.M.A.R.T. disk health, VM/LXC counts
+- `rrd [timeframe]`: Historical CPU/RAM metrics from Proxmox RRD (default `day`, supports `hour`/`week`/`month`/`year`)
+- `services`: Proxmox systemd service status (pveproxy, pvedaemon, corosync, etc.)
+- Health context bolted into `/digest` LLM prompt for holistic advisory summaries
+
+**OpenCode Zen Provider**
+- Added `opencode-zen` provider support in `opencode_client.py`
+- `PROVIDER_BASE_URLS` dict maps provider to API endpoint
+- Zen defaults to `glm-4` (free tier), opencode-go defaults to `glm-5.1`
+- `config.yaml.example` updated with provider selection docs
+- 6 new tests: zen base URL, default model, custom model, default provider, DEFAULT_MODELS dict, zen ask
+
+**Known API Gaps (documented in AGENTS.md)**
+- Temperature sensors: 501 Not Implemented in Proxmox API (requires `lm-sensors` + community patch)
+- LXC package scanning: No API endpoint for guest package lists (requires LXC exec, Phase 7)
+- S.M.A.R.T. detailed data: Limited to health status via API (full details require host-side tools)
+
+**proxmox_tools.py additions**
+- `get_health()`: Aggregated health dict (CPU%, RAM%, RootFS%, storage, disks, VMs, LXCs)
+- `get_rrd_metrics(timeframe)`: Historical RRD data points with normalized timestamps
+- `get_service_status()`: List of Proxmox services with running/dead state
+
+**Results**
+- Tests: 77 passing (was 68)
+- Version: 0.4.0 (unchanged — additive feature)

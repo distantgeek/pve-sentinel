@@ -15,6 +15,18 @@ from .guardrails import get_system_prompt
 
 OPENCODE_GO_BASE = os.environ.get("OPENCODE_GO_BASE", "https://opencode.ai/zen/go/v1")
 
+# Base URLs per provider
+PROVIDER_BASE_URLS = {
+    "opencode-go": "https://opencode.ai/zen/go/v1",
+    "opencode-zen": "https://zen.opencode.ai/v1",
+}
+
+# Default models per provider
+DEFAULT_MODELS = {
+    "opencode-go": "glm-5.1",
+    "opencode-zen": "glm-4",
+}
+
 
 class OpenCodeClient:
     """Direct client for OpenCode Go REST API.
@@ -27,7 +39,8 @@ class OpenCodeClient:
     def __init__(
         self,
         api_key: str = "",
-        model: str = "glm-5.1",
+        model: str = "",
+        provider: str = "opencode-go",
         timeout: float = 120.0,
         guardrail_preset: Optional[str] = None,
         guardrail_custom: Optional[str] = None,
@@ -38,12 +51,14 @@ class OpenCodeClient:
                 "OpenCode Go API key is empty. Set the OPENCODE_GO_API_KEY "
                 "environment variable before running pve-sentinel."
             )
-        self.model = model
+        self.provider = provider
+        self.model = model or DEFAULT_MODELS.get(provider, "glm-5.1")
         self._guardrail_preset = guardrail_preset
         self._guardrail_custom = guardrail_custom
         self._system_prompt: Optional[str] = None
+        base_url = os.environ.get("OPENCODE_GO_BASE", PROVIDER_BASE_URLS.get(provider, OPENCODE_GO_BASE))
         self._client = httpx.Client(
-            base_url=OPENCODE_GO_BASE,
+            base_url=base_url,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",

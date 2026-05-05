@@ -2,7 +2,9 @@
 
 import pytest
 
-from src.guardrails import get_system_prompt, list_presets, PRESETS
+from src.guardrails import (
+    get_system_prompt, list_presets, PRESETS, VALIDATION_DIRECTIVE,
+)
 
 
 class TestGuardrails:
@@ -25,10 +27,6 @@ class TestGuardrails:
         with pytest.raises(ValueError, match="Unknown guardrail preset"):
             get_system_prompt(preset="CIS-UBUNTU-L1")
 
-    def test_custom_overrides_preset(self):
-        prompt = get_system_prompt(preset="cis-ubuntu-l1", custom="Custom rules here.")
-        assert prompt == "Custom rules here."
-
     def test_custom_bypasses_presets(self):
         prompt = get_system_prompt(custom="Strict NIST 800-53 compliance required.")
         assert "NIST 800-53" in prompt
@@ -41,3 +39,30 @@ class TestGuardrails:
         for name, prompt in PRESETS.items():
             assert isinstance(prompt, str), f"Preset {name} is not a string"
             assert len(prompt) > 100, f"Preset {name} is too short"
+
+
+class TestValidationDirective:
+    def test_directive_is_nonempty_string(self):
+        assert isinstance(VALIDATION_DIRECTIVE, str)
+        assert len(VALIDATION_DIRECTIVE) > 50
+
+    def test_directive_prepended_to_default(self):
+        prompt = get_system_prompt()
+        assert VALIDATION_DIRECTIVE in prompt
+        assert prompt.startswith(VALIDATION_DIRECTIVE.strip())
+
+    def test_directive_prepended_to_preset(self):
+        prompt = get_system_prompt(preset="cis-ubuntu-l1")
+        assert VALIDATION_DIRECTIVE in prompt
+        assert prompt.startswith(VALIDATION_DIRECTIVE.strip())
+
+    def test_directive_prepended_to_custom(self):
+        prompt = get_system_prompt(custom="Custom rules.")
+        assert VALIDATION_DIRECTIVE in prompt
+        assert "Custom rules." in prompt
+
+    def test_directive_contains_key_principles(self):
+        assert "Never make definitive claims" in VALIDATION_DIRECTIVE
+        assert "Pending Verification" in VALIDATION_DIRECTIVE
+        assert "already configured" in VALIDATION_DIRECTIVE
+        assert "data source" in VALIDATION_DIRECTIVE

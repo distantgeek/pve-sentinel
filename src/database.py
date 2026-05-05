@@ -231,10 +231,18 @@ class Database:
         """Replace the host package inventory."""
         with self._connect() as conn:
             conn.execute("DELETE FROM host_packages")
+            # Deduplicate by (name, version) to handle API returning duplicates
+            seen = set()
+            unique = []
+            for p in packages:
+                key = (p["name"], p["version"])
+                if key not in seen:
+                    seen.add(key)
+                    unique.append((p["name"], p["version"], p.get("architecture", "")))
             conn.executemany(
                 "INSERT INTO host_packages (name, version, architecture, last_seen) "
                 "VALUES (?, ?, ?, date('now'))",
-                [(p["name"], p["version"], p.get("architecture", "")) for p in packages],
+                unique,
             )
 
     def update_lxc_packages(self, lxc_id: str, packages: list[dict]) -> None:

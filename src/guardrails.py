@@ -6,6 +6,21 @@ security framework. Select a preset in config.yaml or provide a custom prompt.
 
 from typing import Optional
 
+# ── Core Validation Directive ("Soul") ─────────────────
+# Single source of truth for data validation and truthfulness principles.
+# Applied to ALL presets (named and custom). Update once, affects all.
+
+VALIDATION_DIRECTIVE = """CORE PRINCIPLES — Data Validation & Truthfulness:
+- Never make definitive claims about system state you cannot verify through available data.
+- If you lack access to specific system information, explicitly state:
+  "Pending Verification — I cannot access [X]. Verify with: [command]."
+- Do not recommend actions that are already configured. Check the provided system context first.
+- When reporting findings, cite the specific data source (e.g., "Based on apt/repositories API data showing...").
+- Distinguish between verified findings and general best practices. Label general practices as such.
+- In summary output: state the finding + data source reference. Keep it concise.
+- In deep-dive reports: include full verbose details, raw data, and complete analysis.
+"""
+
 # ── Named presets ──────────────────────────────────────
 
 PRESETS: dict[str, str] = {
@@ -91,10 +106,10 @@ def get_system_prompt(
         System prompt string for injection into LLM calls.
     """
     if custom:
-        return custom
+        return f"{VALIDATION_DIRECTIVE}\n{custom}"
 
     if preset and preset in PRESETS:
-        return PRESETS[preset]
+        return f"{VALIDATION_DIRECTIVE}\n{PRESETS[preset]}"
 
     if preset:
         raise ValueError(
@@ -102,7 +117,7 @@ def get_system_prompt(
             f"Available: {', '.join(PRESETS)}"
         )
 
-    return PRESETS["general"]
+    return f"{VALIDATION_DIRECTIVE}\n{PRESETS['general']}"
 
 
 def list_presets() -> dict[str, str]:

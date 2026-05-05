@@ -5,7 +5,6 @@ the permission gate before execution.
 """
 
 import json
-import subprocess
 from typing import Any
 
 from proxmoxer import ProxmoxAPI
@@ -56,6 +55,17 @@ class ProxmoxTools:
             return self.node
         raise RuntimeError("No Proxmox nodes found")
 
+    def _api_traverse(self, api_path: str):
+        """Traverse the Proxmox API dynamically from a path string.
+
+        Converts "/nodes/pve/qemu" -> self.api.nodes(pve).qemu
+        """
+        parts = [p for p in api_path.strip("/").split("/") if p]
+        resource = self.api
+        for part in parts:
+            resource = getattr(resource, part)
+        return resource
+
     # ── Read operations ───────────────────────────────────
 
     def get_status(self) -> dict[str, Any]:
@@ -105,29 +115,57 @@ class ProxmoxTools:
         return self.api.nodes(node).lxc(vmid).status.current.get()
 
     def get_host_packages(self) -> list[dict[str, str]]:
-        """Get installed packages and available updates on the Proxmox host.
+        """Get installed packages on the Proxmox host via API.
 
-        Uses pvesh to query apt update status.
+        Uses the apt/versions endpoint which returns all installed packages
+        with their current versions — no subprocess or pvesh needed.
         """
-        try:
-            result = subprocess.run(
-                ["pvesh", "get", f"/nodes/{self._get_node()}/apt/updates",
-                 "--output-format", "json"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                updates = json.loads(result.stdout)
-                return [
-                    {"name": u["Package"], "version": u.get("OldVersion", ""),
-                     "architecture": u.get("Architecture", "")}
-                    for u in updates
-                ]
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError):
-            pass
-        return []
+        versions = self.api.nodes(self._get_node()).apt.versions.get()
+        return [
+            {"name": v["Package"], "version": v.get("OldVersion", ""),
+             "architecture": v.get("Arch", "")}
+            for v in versions
+            if v.get("CurrentState") == "Installed"
+        ]
+
+    def get_host_repos(self) -> dict[str, Any]:
+        """Get APT repository configuration via API.
+
+        Returns a structured summary of repo status suitable for
+        LLM context injection — enabled/disabled repos, warnings, errors.
+        """
+        repos = self.api.nodes(self._get_node()).apt.repositories.get()
+
+        standard = []
+        for r in repos.get("standard-repos", []):
+            standard.append({
+                "name": r.get("name", ""),
+                "handle": r.get("handle", ""),
+                "enabled": r.get("status", 0) == 1,
+            })
+
+        warnings = [
+            i["message"]
+            for i in repos.get("infos", [])
+            if i.get("kind") == "warning"
+        ]
+
+        return {
+            "standard_repos": standard,
+            "warnings": warnings,
+            "errors": repos.get("errors", []),
+        }
 
     def get_lxc_packages(self, lxc_id: int) -> list[dict[str, str]]:
-        """Get installed packages inside an LXC via pct exec."""
+        """Get installed packages inside an LXC via pct exec.
+
+        NOTE: This method requires root access on the Proxmox host
+        (pct is a host-side tool). For the public release where the
+        LXC runs as a non-root user, this method is unavailable.
+        Phase 7 will migrate to the Proxmox API LXC exec endpoint.
+        """
+        import subprocess
+
         # Detect OS type first
         try:
             os_check = subprocess.run(
@@ -220,13 +258,8 @@ class ProxmoxTools:
         # Allow read-only paths without restriction
         for allowed in self.READ_ONLY_PATHS:
             if api_path.startswith(allowed):
-                result = subprocess.run(
-                    ["pvesh", method, api_path, "--output-format", "json"],
-                    capture_output=True, text=True, timeout=30,
-                )
-                if result.returncode == 0:
-                    return json.loads(result.stdout)
-                raise RuntimeError(f"API command failed: {result.stderr}")
+                resource = self._api_traverse(api_path)
+                return resource.get()
 
         # All other paths require explicit permission gate (handled by CLI layer)
         raise PermissionError(

@@ -405,14 +405,26 @@ class SentinelShell:
             # Get host packages if Proxmox is available
             packages = []
             if self.proxmox:
+                packages = self.proxmox.get_host_packages()
+
+            # Get repo status for LLM context
+            repo_context = ""
+            repo_summary = ""
+            if self.proxmox:
                 try:
-                    packages = self.proxmox.get_host_packages()
-                except FileNotFoundError:
-                    # pvesh is only available on the Proxmox host, not in LXCs
-                    self.console.print(
-                        "[dim]Host package scan skipped (pvesh not available in LXC). "
-                        "Local LXC scan will still run.[/dim]"
+                    repos = self.proxmox.get_host_repos()
+                    enabled = [r["name"] for r in repos["standard_repos"] if r["enabled"]]
+                    disabled = [r["name"] for r in repos["standard_repos"] if not r["enabled"]]
+                    repo_context = (
+                        f"APT Repositories: enabled={enabled}, disabled={disabled}\n"
+                        f"Warnings: {repos['warnings']}\n"
+                        f"Errors: {repos['errors']}"
                     )
+                    repo_summary = (
+                        f"Repos: {', '.join(enabled) if enabled else 'none enabled'}"
+                    )
+                except Exception:
+                    repo_context = "APT Repositories: unable to query (pending verification)"
 
             result = scanner.scan_host(packages=packages)
 
@@ -423,6 +435,7 @@ class SentinelShell:
             self.console.print(Panel(
                 f"Host scan: {result['cves_found']} CVEs, {result['packages_checked']} packages\n"
                 f"LXC scan:  {lxc_result['cves_matched']} matches, {lxc_result['packages_checked']} packages\n"
+                f"{repo_summary}\n"
                 f"Duration:  {result['duration'] + lxc_result['duration']:.1f}s",
                 title="Scan Results",
                 border_style="green",
@@ -451,12 +464,15 @@ class SentinelShell:
             # LLM summary
             if self.client and result["cves_found"] > 0:
                 with self.console.status("[cyan]Generating LLM summary...[/cyan]"):
-                    summary = self.client.ask(
+                    summary_prompt = (
                         f"Summarize these CVE scan results and provide prioritized recommendations:\n"
                         f"- {result['cves_found']} CVEs found\n"
                         f"- {result['packages_checked']} packages checked\n"
                         f"- Duration: {result['duration']:.1f}s"
                     )
+                    if repo_context:
+                        summary_prompt += f"\n\nSystem context:\n{repo_context}"
+                    summary = self.client.ask(summary_prompt)
                 if summary:
                     self.console.print(Markdown(summary))
         except Exception as e:

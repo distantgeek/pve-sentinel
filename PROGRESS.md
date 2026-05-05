@@ -187,3 +187,38 @@ What needs to be built:
 - **SSL fix**: Removed `SSL_CERT_FILE` from `.env` — it was breaking external HTTPS
 - Scanner runs: 213 CVEs fetched, 285 local packages checked, 0 matches (clean LXC)
 - Version bumped to 0.3.0
+
+### 2026-05-05: API Migration + VALIDATION_DIRECTIVE ✅ Complete
+
+**VALIDATION_DIRECTIVE ("Soul")**
+- Added `VALIDATION_DIRECTIVE` constant to `src/guardrails.py` — single update point
+- Prepended to ALL guardrail presets (named and custom) via `get_system_prompt()`
+- Core principles: no unverified claims, "Pending Verification" for inaccessible data,
+  cite data sources, distinguish verified vs general, summary concise / deep-dive verbose
+- 5 new tests: directive nonempty, prepended to default/preset/custom, contains key principles
+
+**API Migration — `proxmox_tools.py`**
+- `get_host_packages()`: replaced `pvesh` subprocess with `apt/versions` API endpoint
+- `get_host_repos()`: new method using `apt/repositories` API — returns structured repo status
+  (enabled/disabled repos, warnings, errors) for LLM context injection
+- `run_command()`: replaced `pvesh` subprocess with dynamic API traversal (`_api_traverse()`)
+- Removed `subprocess` import from module-level (kept in `get_lxc_packages()` for Phase 7)
+- `get_lxc_packages()` kept as subprocess — requires root on Proxmox host, Phase 7 API migration
+- 2 new tests: `test_returns_installed_packages`, `test_returns_repo_summary`
+
+**CLI — `/digest` with repo context**
+- Removed `FileNotFoundError` catch (no longer needed — no subprocess)
+- Fetch repo status via `get_host_repos()` and include in LLM prompt
+- Scan results panel shows: host CVEs, LXC matches, enabled repos, duration
+- LLM now correctly references repo data instead of producing false positives
+
+**Database fix**
+- `update_host_packages()` deduplicates by (name, version) to handle API returning duplicates
+- Fixed `UNIQUE constraint failed: host_packages.name, host_packages.version`
+
+**Results**
+- LLM correctly says "Pending Verification" for data it can't access (source file contents)
+- No more false "enable Proxmox repos" recommendations — LLM sees No-Subscription is enabled
+- Scan results: 30 CVEs across 59 host packages, 0 matches across 285 LXC packages
+- Version bumped to 0.4.0
+- Tests: 68 passing (was 62)

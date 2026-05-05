@@ -13,11 +13,11 @@
 | LLM | GLM-5.1 via OpenCode Go REST API |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 62 passing |
+| Tests | `uv run pytest tests/` — 68 passing |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
-| Version | 0.3.0 |
+| Version | 0.4.0 |
 
 ## Architecture
 
@@ -33,9 +33,9 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 │   src/config.py        YAML config + dotenv + env resolve│
 │   src/database.py      SQLite schema + CRUD (12 tables)  │
 │   src/opencode_client.py  Direct API client (httpx)     │
-│   src/guardrails.py    Security framework presets        │
+│   src/guardrails.py    VALIDATION_DIRECTIVE + presets    │
 │   src/cve_scanner.py   NVD+MITRE+PVE-SA pipeline (httpx) │
-│   src/proxmox_tools.py proxmoxer + pvesh wrapper         │
+│   src/proxmox_tools.py proxmoxer (API-only, no pvesh)   │
 │   src/permission_gate.py Read/write/destroy + secrets    │
 │   src/setup.py         Setup helper (cert, verify)       │
 │   src/scanner_cli.py   systemd timer entry point         │
@@ -65,6 +65,23 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 | 8 | Community Scripts installer | deferred |
 
 ## Security Guardrails
+
+### VALIDATION_DIRECTIVE ("Soul")
+
+A single master constant (`src/guardrails.py:VALIDATION_DIRECTIVE`) is prepended to
+every guardrail preset (named and custom). It enforces data validation and truthfulness:
+
+- Never make definitive claims about system state you cannot verify
+- Use "Pending Verification" for inaccessible data with verification commands
+- Don't recommend actions that are already configured
+- Cite specific data sources for findings
+- Distinguish verified findings from general best practices
+- Summary output: concise finding + source reference
+- Deep-dive reports: full verbose details, raw data, complete analysis
+
+**Single update point** — change `VALIDATION_DIRECTIVE` once, affects all presets.
+
+### Framework Presets
 
 Four named presets selectable via config.yaml:
 
@@ -142,6 +159,8 @@ Profile.d fallback: `/etc/profile.d/pve-sentinel.sh`.
 8. **python-dotenv** — `.env` file auto-loaded regardless of shell context.
 9. **No SSL_CERT_FILE override** — Setting it to Proxmox-only CA breaks external HTTPS (NVD, MITRE). Use `verify_ssl: false` for Proxmox instead.
 10. **SSH key separation** — `id_ed25519_pve-sentinel` for LXC access, `id_ed25519_proxmox` for Proxmox host.
+11. **API-only Proxmox access** — `proxmox_tools.py` uses `proxmoxer` API exclusively. No `pvesh` subprocess calls for host packages, repos, or run_command. Least-privilege: no root needed on Proxmox host.
+12. **VALIDATION_DIRECTIVE as "Soul"** — Single constant for core LLM truthfulness principles. One update point, affects all guardrails. Prevents false positives by requiring data verification before making claims.
 
 ## Security Hardening (Phase 0)
 
@@ -205,13 +224,13 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `cli.py` | Interactive REPL with prompt_toolkit + rich | ✅ Phase 3 complete |
+| `cli.py` | Interactive REPL with prompt_toolkit + rich, repo context in digest | ✅ Phase 3+ |
 | `src/config.py` | YAML config loader, dotenv, env var resolution, token validation | ✅ Hardened |
-| `src/database.py` | SQLite 12-table schema, CRUD, WAL mode, 0o700 dir | ✅ Hardened |
+| `src/database.py` | SQLite 12-table schema, CRUD, WAL mode, 0o700 dir, dedup | ✅ Hardened |
 | `src/opencode_client.py` | Direct REST API client, context manager, cached guardrails | ✅ Hardened |
-| `src/guardrails.py` | 4 presets + custom, system prompt injection | ✅ Complete |
+| `src/guardrails.py` | VALIDATION_DIRECTIVE + 4 presets + custom, system prompt injection | ✅ Phase 6 |
 | `src/cve_scanner.py` | NVD+MITRE+PVE-SA pipeline, httpx, priority matrix, local pkg scan | ✅ Phase 5 |
-| `src/proxmox_tools.py` | proxmoxer wrapper, pvesh, path gating, verify_ssl=True | ✅ Hardened |
+| `src/proxmox_tools.py` | proxmoxer API-only (no pvesh), get_host_repos, dynamic traversal | ✅ Phase 6 |
 | `src/permission_gate.py` | READ/WRITE/DESTRUCTIVE, secrets.choice, DENY_ALWAYS | ✅ Hardened |
 | `src/setup.py` | Setup helper: cert fetch, connectivity verify | ✅ Phase 4.5 |
 | `src/scanner_cli.py` | systemd timer entry point, host + local LXC scan | ✅ Phase 5 |
@@ -221,7 +240,7 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |
 | `systemd/cve-digest.timer` | Weekly digest timer (Mon 08:00 UTC) | ✅ Phase 5 |
-| `tests/` | 62 tests across 7 modules | ✅ Complete |
+| `tests/` | 68 tests across 7 modules | ✅ Complete |
 
 ## On-LXC File Locations
 

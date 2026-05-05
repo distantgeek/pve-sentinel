@@ -114,11 +114,25 @@ LXC: pve-sentinel (Debian 13, 4C/8GB/32GB, unprivileged)
 ├── OpenCode Go REST API → GLM-5.1 (direct HTTPS, no local server)
 ├── Python orchestrator  → CLI, CVE scanner, Proxmox tools
 ├── CVE sources          → NVD API, MITRE CVE, PVE-SA wiki feed
+├── Proxmox API          → proxmoxer (API-only, no pvesh subprocess)
 ├── SQLite               → CVE database, package inventory, advisories (12 tables)
 ├── .env                 → API keys, tokens (auto-loaded via dotenv)
 ├── systemd timers       → Daily scans (00:06), weekly digests (Mon 08:00)
 └── MOTD                 → SSH login banner with quick-start commands
 ```
+
+## Data Validation ("Soul")
+
+All LLM responses are constrained by `VALIDATION_DIRECTIVE` — a single constant
+in `src/guardrails.py` that enforces truthfulness:
+
+- Never make claims about system state you cannot verify
+- Use "Pending Verification" for inaccessible data
+- Don't recommend actions that are already configured
+- Cite specific data sources for findings
+
+This prevents false positives like "enable Proxmox repos" when repos are already enabled.
+The LLM receives real repo status from the Proxmox API and can make informed recommendations.
 
 ## Security Guardrails
 
@@ -156,8 +170,8 @@ model:
 uv run pytest tests/ -v
 ```
 
-62 tests across 7 modules: config, cve_scanner, database, guardrails,
-opencode_client, permission_gate, proxmox_tools.
+68 tests across 8 modules: config, cve_scanner, database, guardrails,
+opencode_client, permission_gate, proxmox_tools, setup.
 
 ## License
 

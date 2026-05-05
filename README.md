@@ -86,6 +86,7 @@ Key file locations on the LXC:
 /status              Proxmox resource overview
 /health [subcmd]     System health: full, rrd [timeframe], services
 /refresh [type]      Update cached context: repos/health/services/all
+/db [subcmd]         Database: status/vacuum/prune/history
 /proxmox <action>    Proxmox API operation (write = confirm required)
 /guardrails [preset] Show or switch security framework preset
 /history             Recent scan history
@@ -178,8 +179,8 @@ uv run pytest tests/ -v
 PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 ```
 
-84 standard tests across 9 modules: config, cve_scanner, database, guardrails,
-opencode_client, permission_gate, proxmox_tools, setup, snapshot.
+97 standard tests across 10 modules: config, cve_scanner, database, db_maintenance,
+guardrails, opencode_client, permission_gate, proxmox_tools, setup, snapshot.
 
 Plus 13 conversation tests (env-gated) that verify LLM guardrail compliance:
 no hallucinated commands, no unsolicited tool suggestions, correct verification

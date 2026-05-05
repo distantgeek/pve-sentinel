@@ -13,7 +13,7 @@
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 84 passing (+13 env-gated conversation tests) |
+| Tests | `uv run pytest tests/` — 97 passing (+13 env-gated conversation tests) |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
@@ -116,6 +116,10 @@ Reference data at `src/framework_data/nist_csf_ai.yaml` (full CSF 2.0 structure 
 | `/health services` | Proxmox service status |
 | `/status` | Proxmox resource overview (VMs, LXCs, storage) |
 | `/refresh [type]` | Update cached system context (repos/health/services/all) |
+| `/db status` | Database size, row counts, maintenance level |
+| `/db vacuum` | Run VACUUM to reclaim space |
+| `/db prune [days]` | Archive and remove old unmatched CVEs (default 365) |
+| `/db history [n]` | Show recent conversation history (default 10) |
 | `/proxmox <action>` | Proxmox API operation (write = confirm required) |
 | `/guardrails [preset]` | Show or switch security framework preset |
 | `/history` | Recent scan history from SQLite |
@@ -124,7 +128,8 @@ Reference data at `src/framework_data/nist_csf_ai.yaml` (full CSF 2.0 structure 
 
 Free-text input is sent directly to the LLM for advisory chat. System context
 (repos, health, services) is cached during `/digest` or `/refresh` and injected
-into every chat message with timestamp attribution.
+into every chat message with timestamp attribution. Conversation history is
+logged to SQLite with topic extraction for retrieval.
 
 ## Setup Helper
 
@@ -220,6 +225,32 @@ ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5
 cd advisory
 uv run pytest tests/ -v
 ```
+
+## Database Maintenance
+
+SQLite does not require periodic re-indexing like MSSQL. However, after heavy
+DELETE operations, `VACUUM` reclaims free space in the database file.
+
+| DB Size | Level | Behavior |
+|---------|-------|----------|
+| < 50MB | OK | Silent |
+| 50-74MB | Info | Dim info on startup |
+| 75-99MB | Warning | Yellow warning on startup |
+| 100MB+ | Critical | Red nag on every startup |
+
+**100MB is not critical for SQLite** (handles up to 281TB). The threshold is
+about operational hygiene: backup speed, disk usage predictability, and data
+lifecycle management. For homelab/SMB, 100MB+ is totally manageable.
+
+```bash
+/db status          # Show size, row counts, maintenance level
+/db vacuum          # Reclaim space (1-3s, locks DB during operation)
+/db prune [days]    # Archive unmatched CVEs older than N days (default 365)
+/db history [n]     # Show recent conversation history
+```
+
+Pruned CVEs are archived to `cve_archive` table before deletion — reversible.
+Does not affect future CVE detection (NVD fetch is independent of DB contents).
 
 ## Sync to LXC
 

@@ -102,3 +102,11 @@ storage:
   digest_dir: "./digests"       # CVE digest output directory
   log_dir: "./logs"             # Application logs
   max_digest_age: 90            # days to keep digests
+
+  # Database maintenance
+  auto_vacuum: false            # Run VACUUM automatically on /digest if DB > 50MB
+                                # Pros: Keeps DB compact without manual intervention
+                                # Cons: Adds ~1-3s to /digest, locks DB during vacuum
+                                # Recommendation: Enable for homelab, disable for large deployments
+  db_size_threshold_mb: 100     # Warning threshold for DB size alerts
+                                # Info at 50MB, warning at 75MB, nag at 100MB+

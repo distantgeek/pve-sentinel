@@ -322,5 +322,54 @@ What needs to be built:
 
 **Results**
 - Standard tests: 84 passing (was 77)
-- Zero additional API calls during digest or chat
 - API cost-conscious design: cache once, reference many times
+
+### 2026-05-05: DB Maintenance + Conversation Log + /db Command ✅ Complete
+
+**Database Maintenance (`src/database.py`)**
+- New `get_size_mb()`, `get_maintenance_status()` with tiered levels (ok/info/warning/critical)
+- `vacuum()` — reclaims space after DELETE operations
+- `prune_old_cves(days)` — archives unmatched CVEs to `cve_archive` before deletion
+- Tiered warnings: 50MB (info), 75MB (warning), 100MB+ (nag on every startup)
+- 100MB is not critical for SQLite (handles 281TB) — threshold is operational hygiene
+
+**Conversation Log (`src/database.py`)**
+- New `conversation_log` table with role/content/timestamp/topic columns
+- `log_conversation()` — auto-extracts topic from user input via keyword matching
+- `get_recent_conversations(limit)` — returns last N messages in order
+- `get_conversations_by_topic(topic, limit)` — topic-based retrieval
+- `prune_conversations(days)` — archives to `conversation_archive` before deletion
+- Topics: repositories, cves, guests, health, network, security, general
+
+**`/db` Command (`cli.py`)**
+- `/db status` — size, row counts, maintenance level
+- `/db vacuum` — run VACUUM, show before/after size
+- `/db prune [days]` — archive unmatched CVEs (default 365 days)
+- `/db history [n]` — show recent conversation history (default 10)
+
+**Startup DB Size Check**
+- Info at 50MB: dim message, growing normally
+- Warning at 75MB: yellow, suggests /db prune
+- Critical at 100MB+: red nag every startup, explains why
+
+**Health Integration**
+- `/health` now shows DB status: size, level, CVE count, match count
+
+**Conversation Logging**
+- Every chat message logged to SQLite with topic extraction
+- Deterministic keyword matching (no LLM overhead)
+- Archived before pruning for safety
+
+**`config.yaml.example`**
+- Added `auto_vacuum: false` (user preference, not default)
+- Added `db_size_threshold_mb: 100` (warning threshold)
+- Documented pros/cons of auto-vacuum
+
+**Tests (`tests/test_db_maintenance.py`)**
+- 13 new tests: size monitoring, maintenance levels, vacuum, CVE pruning,
+  conversation log, topic extraction, conversation pruning with archiving
+
+**Results**
+- Standard tests: 97 passing (was 84)
+- Zero API overhead for all DB operations
+- SQLite does NOT require periodic re-indexing like MSSQL

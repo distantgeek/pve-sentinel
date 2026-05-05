@@ -134,6 +134,35 @@ CREATE TABLE IF NOT EXISTS system_snapshot (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS conversation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    topic TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cve_archive (
+    id TEXT PRIMARY KEY,
+    description TEXT,
+    severity TEXT,
+    cvss_score REAL,
+    published DATE,
+    modified DATE,
+    affected_package TEXT,
+    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    archive_reason TEXT
+);
+
+CREATE TABLE IF NOT EXISTS conversation_archive (
+    id INTEGER PRIMARY KEY,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp TIMESTAMP,
+    topic TEXT,
+    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_cves_severity ON cves(severity);
 CREATE INDEX IF NOT EXISTS idx_cves_package ON cves(affected_package);
 CREATE INDEX IF NOT EXISTS idx_cve_matches_pkg ON cve_matches(package_name);
@@ -142,6 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_lxc_matches_lxc ON lxc_cve_matches(lxc_id);
 CREATE INDEX IF NOT EXISTS idx_guest_matches_guest ON guest_cve_matches(guest_id);
 CREATE INDEX IF NOT EXISTS idx_guest_packages_guest ON guest_packages(guest_id);
 CREATE INDEX IF NOT EXISTS idx_scan_log_date ON scan_log(started_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_role ON conversation_log(role);
+CREATE INDEX IF NOT EXISTS idx_conversation_topic ON conversation_log(topic);
+CREATE INDEX IF NOT EXISTS idx_conversation_ts ON conversation_log(timestamp);
 """
 
 
@@ -407,3 +439,146 @@ class Database:
         """Clear all cached snapshots."""
         with self._connect() as conn:
             conn.execute("DELETE FROM system_snapshot")
+
+    # ── Database maintenance ────────────────────────────────
+
+    def get_size_mb(self) -> float:
+        """Get current database file size in MB."""
+        try:
+            return self.db_path.stat().st_size / (1024 * 1024)
+        except OSError:
+            return 0.0
+
+    def get_maintenance_status(self) -> dict:
+        """Get database maintenance status with tiered level."""
+        size = self.get_size_mb()
+        if size < 50:
+            level = "ok"
+        elif size < 75:
+            level = "info"
+        elif size < 100:
+            level = "warning"
+        else:
+            level = "critical"
+
+        with self._connect() as conn:
+            counts = {
+                "cves": conn.execute("SELECT COUNT(*) FROM cves").fetchone()[0],
+                "matches": conn.execute("SELECT COUNT(*) FROM cve_matches").fetchone()[0],
+                "advisories": conn.execute("SELECT COUNT(*) FROM pve_security_advisories").fetchone()[0],
+                "snapshots": conn.execute("SELECT COUNT(*) FROM system_snapshot").fetchone()[0],
+                "conversations": conn.execute("SELECT COUNT(*) FROM conversation_log").fetchone()[0],
+                "archived_cves": conn.execute("SELECT COUNT(*) FROM cve_archive").fetchone()[0],
+            }
+
+        return {
+            "size_mb": round(size, 2),
+            "level": level,
+            "row_counts": counts,
+        }
+
+    def vacuum(self) -> float:
+        """Run VACUUM to reclaim space. Returns new size in MB."""
+        with self._connect() as conn:
+            conn.execute("VACUUM")
+        return self.get_size_mb()
+
+    def prune_old_cves(self, days: int = 365) -> int:
+        """Archive and remove unmatched CVEs older than N days.
+
+        Archives to cve_archive table before deletion for safety.
+        Only affects CVEs with no active matches in cve_matches.
+        Does not affect future detection — NVD fetch is independent.
+
+        Returns:
+            Number of CVEs archived and removed.
+        """
+        with self._connect() as conn:
+            # Archive first
+            conn.execute(
+                "INSERT OR IGNORE INTO cve_archive "
+                "(id, description, severity, cvss_score, published, modified, "
+                "affected_package, archive_reason) "
+                "SELECT id, description, severity, cvss_score, published, modified, "
+                "affected_package, 'pruned_unmatched_' || ? || 'days' "
+                "FROM cves WHERE id NOT IN "
+                "(SELECT DISTINCT cve_id FROM cve_matches) "
+                "AND date(modified) < date('now', ?)",
+                (days, f"-{days} days"),
+            )
+            # Then delete
+            result = conn.execute(
+                "DELETE FROM cves WHERE id IN "
+                "(SELECT id FROM cve_archive WHERE archive_reason = ?)",
+                (f"pruned_unmatched_{days}days",),
+            )
+            return result.rowcount
+
+    # ── Conversation log ────────────────────────────────────
+
+    CONVERSATION_TOPICS = {
+        "repositories": ["repo", "apt", "sources", "bookworm", "trixie", "subscription"],
+        "cves": ["cve", "vuln", "patch", "update", "upgrade", "advisory"],
+        "guests": ["vm", "lxc", "container", "guest", "pct", "qemu"],
+        "health": ["health", "cpu", "ram", "disk", "storage", "temperature", "memory"],
+        "network": ["network", "firewall", "bridge", "vlan", "dns", "ip", "subnet"],
+        "security": ["security", "harden", "audit", "compliance", "guardrail"],
+    }
+
+    @classmethod
+    def extract_topic(cls, text: str) -> str:
+        """Extract topic from user input via keyword matching."""
+        lower = text.lower()
+        for topic, keywords in cls.CONVERSATION_TOPICS.items():
+            for kw in keywords:
+                if kw in lower:
+                    return topic
+        return "general"
+
+    def log_conversation(self, role: str, content: str, topic: str = "") -> None:
+        """Append a message to the conversation log."""
+        if not topic:
+            topic = self.extract_topic(content) if role == "user" else "assistant"
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO conversation_log (role, content, topic) VALUES (?, ?, ?)",
+                (role, content, topic),
+            )
+
+    def get_recent_conversations(self, limit: int = 20) -> list[dict]:
+        """Get the most recent conversation entries."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, role, content, timestamp, topic FROM conversation_log "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def get_conversations_by_topic(self, topic: str, limit: int = 10) -> list[dict]:
+        """Get recent conversations matching a topic."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, role, content, timestamp, topic FROM conversation_log "
+                "WHERE topic = ? ORDER BY id DESC LIMIT ?",
+                (topic, limit),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def prune_conversations(self, days: int = 90) -> int:
+        """Archive and remove conversations older than N days."""
+        import json
+        with self._connect() as conn:
+            # Archive
+            conn.execute(
+                "INSERT INTO conversation_archive (role, content, timestamp, topic) "
+                "SELECT role, content, timestamp, topic FROM conversation_log "
+                "WHERE date(timestamp) < date('now', ?)",
+                (f"-{days} days",),
+            )
+            # Delete
+            result = conn.execute(
+                "DELETE FROM conversation_log WHERE date(timestamp) < date('now', ?)",
+                (f"-{days} days",),
+            )
+            return result.rowcount

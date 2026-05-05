@@ -34,7 +34,7 @@ from src.version import version_string
 HISTORY_FILE = str(Path.home() / ".config" / "pve-sentinel" / "cli_history")
 
 COMMANDS = {
-    "/digest": "Run full CVE scan and LLM summary",
+    "/digest": "Run full CVE scan and LLM summary (caches system context)",
     "/cve check <pkg>": "Deep-dive a specific package",
     "/cve scan": "Run host-only CVE scan",
     "/health": "Full hypervisor health dashboard",
@@ -42,6 +42,7 @@ COMMANDS = {
     "/health services": "Proxmox service status",
     "/status": "Proxmox resource overview",
     "/refresh [type]": "Update cached system context (repos/health/services/all)",
+    "/db [subcmd]": "Database management: status/vacuum/prune/history",
     "/proxmox <action>": "Proxmox API operation (write = confirm)",
     "/guardrails [preset]": "Show or switch security framework preset",
     "/history": "Recent scan history",
@@ -181,6 +182,7 @@ class SentinelShell:
         """Main REPL loop."""
         print_banner()
         self._print_startup_status()
+        self._check_db_size()
 
         while True:
             try:
@@ -231,6 +233,7 @@ class SentinelShell:
             "/digest": self._cmd_digest,
             "/health": self._cmd_health,
             "/refresh": self._cmd_refresh,
+            "/db": self._cmd_db,
             "/guardrails": self._cmd_guardrails,
             "/cve": self._cmd_cve,
             "/proxmox": self._cmd_proxmox,
@@ -264,6 +267,9 @@ class SentinelShell:
 
             if response:
                 self.console.print(Markdown(response))
+                # Log conversation
+                self.db.log_conversation("user", prompt)
+                self.db.log_conversation("assistant", response)
             else:
                 self.console.print("[yellow]No response from model.[/yellow]")
         except Exception as e:
@@ -310,6 +316,24 @@ class SentinelShell:
             )
 
         return "\n".join(parts)
+
+    def _check_db_size(self) -> None:
+        """Check DB size and display tiered warning on startup."""
+        status = self.db.get_maintenance_status()
+        level = status["level"]
+        if level == "info":
+            self.console.print(f"[dim]ℹ DB: {status['size_mb']} MB — growing normally[/dim]")
+        elif level == "warning":
+            self.console.print(
+                f"[yellow]⚠ DB: {status['size_mb']} MB — consider /db prune to archive old unmatched CVEs[/yellow]"
+            )
+        elif level == "critical":
+            self.console.print(
+                f"[red]🔴 DB: {status['size_mb']} MB — exceeds recommended threshold.[/red]"
+            )
+            self.console.print(
+                "[red]   Run /db status for options. Unmatched CVEs older than 1 year can be safely pruned.[/red]"
+            )
 
     # ── Command Handlers ───────────────────────────────────────────
 
@@ -896,6 +920,17 @@ class SentinelShell:
         # VM/LXC counts
         lines.append(f"Guests: {health['vm_count']} VMs, {health['lxc_count']} LXCs")
 
+        # Database status
+        db_status = self.db.get_maintenance_status()
+        level_colors = {"ok": "green", "info": "dim", "warning": "yellow", "critical": "red"}
+        level_color = level_colors.get(db_status["level"], "white")
+        rc = db_status["row_counts"]
+        lines.append(
+            f"Database: {db_status['size_mb']} MB | "
+            f"[{level_color}]{db_status['level'].upper()}[/{level_color}] | "
+            f"{rc['cves']:,} CVEs, {rc['matches']:,} matches"
+        )
+
         self.console.print(Panel(
             "\n".join(lines),
             title="Proxmox Health",
@@ -975,6 +1010,99 @@ class SentinelShell:
             else:
                 state_str = state
             table.add_row(s["name"], state_str)
+
+        self.console.print(table)
+
+    def _cmd_db(self, parts: list[str]) -> None:
+        """Database management subcommands."""
+        if len(parts) < 2:
+            self.console.print("[red]Usage:[/red] /db status | vacuum | prune [days] | history [n]")
+            return
+
+        subcmd = parts[1].lower()
+
+        if subcmd == "status":
+            self._db_status()
+        elif subcmd == "vacuum":
+            self._db_vacuum()
+        elif subcmd == "prune":
+            days = int(parts[2]) if len(parts) >= 3 else 365
+            self._db_prune(days)
+        elif subcmd == "history":
+            n = int(parts[2]) if len(parts) >= 3 else 10
+            self._db_history(n)
+        else:
+            self.console.print(f"[red]Unknown subcommand:[/red] {subcmd}")
+            self.console.print("Usage: /db status | vacuum | prune [days] | history [n]")
+
+    def _db_status(self) -> None:
+        """Show database size and row counts."""
+        status = self.db.get_maintenance_status()
+        level_colors = {"ok": "green", "info": "dim", "warning": "yellow", "critical": "red"}
+        level_color = level_colors.get(status["level"], "white")
+
+        lines = []
+        lines.append(f"Size:  [bold]{status['size_mb']} MB[/bold]")
+        lines.append(f"Level: [{level_color}]{status['level'].upper()}[/{level_color}]")
+        lines.append("")
+        lines.append("Row Counts:")
+        for key, count in status["row_counts"].items():
+            label = key.replace("_", " ").title()
+            lines.append(f"  {label}: {count:,}")
+
+        self.console.print(Panel("\n".join(lines), title="Database Status", border_style="cyan"))
+
+    def _db_vacuum(self) -> None:
+        """Run VACUUM to reclaim space."""
+        before = self.db.get_size_mb()
+        with self.console.status("[cyan]Running VACUUM...[/cyan]"):
+            after = self.db.vacuum()
+        self.console.print(Panel(
+            f"Before: {before:.2f} MB\nAfter:  {after:.2f} MB\nFreed:  {before - after:.2f} MB",
+            title="VACUUM Complete",
+            border_style="green",
+        ))
+
+    def _db_prune(self, days: int) -> None:
+        """Archive and remove old unmatched CVEs."""
+        with self.console.status(f"[cyan]Pruning unmatched CVEs older than {days} days...[/cyan]"):
+            count = self.db.prune_old_cves(days)
+        after = self.db.get_size_mb()
+        self.console.print(Panel(
+            f"Archived and removed: {count} CVEs\n"
+            f"Current DB size: {after:.2f} MB\n"
+            f"Note: Pruned CVEs are archived in cve_archive table for safety.",
+            title="Prune Complete",
+            border_style="green",
+        ))
+
+    def _db_history(self, n: int) -> None:
+        """Show recent conversation history."""
+        conversations = self.db.get_recent_conversations(n)
+        if not conversations:
+            self.console.print("[dim]No conversation history.[/dim]")
+            return
+
+        table = Table(title=f"Conversation History (last {n})")
+        table.add_column("#", width=4)
+        table.add_column("Role", width=10)
+        table.add_column("Topic", width=14)
+        table.add_column("Preview", width=60)
+        table.add_column("Time", width=20)
+
+        for i, c in enumerate(conversations, 1):
+            preview = c["content"][:80].replace("\n", " ")
+            if len(c["content"]) > 80:
+                preview += "..."
+            role = "user" if c["role"] == "user" else "assistant"
+            role_style = "cyan" if role == "user" else "magenta"
+            table.add_row(
+                str(i),
+                Text(role, style=role_style),
+                c.get("topic", ""),
+                preview,
+                c["timestamp"][:19] if c["timestamp"] else "",
+            )
 
         self.console.print(table)
 

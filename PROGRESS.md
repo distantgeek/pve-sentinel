@@ -157,3 +157,21 @@ What needs to be built:
 3. PVE-SA database is empty (no advisory feed parser yet)
 4. LXC scanning requires manual package population (no automated pct exec pipeline yet)
 5. No conversation history persistence (only scan history in SQLite)
+6. **SSL verification with Proxmox default CA**: Proxmox VE's default self-signed CA
+   certificate lacks the `keyUsage` X.509 extension required by modern Python/OpenSSL
+   (3.12+). `verify_ssl: false` in `config.yaml` is required for homelab environments.
+   The `src/setup.py cert` command is provided for environments where the Proxmox CA
+   has been replaced with a standards-compliant cert.
+
+### 2026-05-05: SSH Key Separation + SSL Investigation
+
+- Generated sentinel-specific SSH key pair (`id_ed25519_pve-sentinel`) for kevbot-only LXC access
+- Updated `src/setup.py cert` for user-level CA trust store (`~/.local/share/ca-certificates/`)
+- Updated `.env` template with `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE`
+- Updated `config.yaml.example` with user-level CA documentation
+- Injected new SSH key into LXC kevbot `authorized_keys` (no root, no `chown`)
+- Tested LXC access with new key — works perfectly, zero root needed
+- **SSL root cause identified**: Proxmox default CA cert missing `keyUsage` extension
+  — confirmed via `openssl x509 -text`. Env var ordering irrelevant; cert itself is
+  invalid by modern X.509 standards. `verify_ssl: false` is the practical workaround.
+- Updated `AGENTS.md`, `PROGRESS.md` with SSL limitation documentation

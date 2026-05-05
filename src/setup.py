@@ -3,7 +3,7 @@
 Provides commands for initial configuration and connectivity verification.
 
 Usage:
-    uv run python -m src.setup cert       # Install Proxmox CA certificate
+    uv run python -m src.setup cert       # Install Proxmox CA certificate (user-level)
     uv run python -m src.setup verify     # Test Proxmox API + LLM connectivity
     uv run python -m src.setup wizard     # Interactive setup (future)
 """
@@ -13,10 +13,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
+
+# Load .env at module import time
+for candidate in [Path(".env"), Path("advisory/.env"), Path.home() / "advisory" / ".env"]:
+    if candidate.exists():
+        load_dotenv(dotenv_path=candidate)
+        break
 
 
 def _get_proxmox_host() -> str:
@@ -35,7 +42,15 @@ def _get_proxmox_port() -> int:
 
 
 def cmd_cert() -> None:
-    """Fetch the Proxmox CA certificate and install it to the system trust store."""
+    """Fetch the Proxmox CA certificate and install it to the user-level trust store.
+
+    This is a rootless operation. The certificate is installed to:
+        ~/.local/share/ca-certificates/pve-root-ca.crt
+
+    Note: Proxmox's default self-signed CA cert may not include the keyUsage
+    extension required by modern Python/OpenSSL. If verification still fails
+    after installing the cert, set verify_ssl: false in config.yaml (homelab only).
+    """
     host = _get_proxmox_host()
     if not host:
         console.print(Panel(
@@ -50,11 +65,10 @@ def cmd_cert() -> None:
     port = _get_proxmox_port()
     console.print(f"[cyan]Fetching CA certificate from {host}:{port}...[/cyan]")
 
-    # Use openssl s_client to observe the TLS handshake and extract the cert chain
     try:
         result = subprocess.run(
             ["openssl", "s_client", "-connect", f"{host}:{port}", "-showcerts"],
-            input=b"Q",  # Send Q to quit immediately after handshake
+            input=b"Q",
             capture_output=True,
             timeout=15,
         )
@@ -69,7 +83,7 @@ def cmd_cert() -> None:
         console.print(f"[red]openssl failed: {result.stderr.decode().strip()}[/red]")
         sys.exit(1)
 
-    # Parse the certificate chain — extract the root CA (last cert in chain)
+    # Parse the certificate chain
     output = result.stdout.decode()
     certs = []
     in_cert = False
@@ -93,47 +107,69 @@ def cmd_cert() -> None:
     # The last cert in the chain is the root CA
     root_ca = certs[-1]
 
-    # Determine install path based on OS
-    ca_dir = Path("/usr/local/share/ca-certificates")
+    # Install to user-level CA trust store
+    ca_dir = Path.home() / ".local" / "share" / "ca-certificates"
+    ca_dir.mkdir(parents=True, exist_ok=True)
     ca_file = ca_dir / "pve-root-ca.crt"
+    ca_file.write_text(root_ca + "\n")
 
-    # Check if we need sudo
-    needs_sudo = not os.access(ca_dir, os.W_OK)
+    console.print(f"[green]Certificate saved to {ca_file}[/green]")
 
-    if needs_sudo:
+    # Set SSL_CERT_FILE and REQUESTS_CA_BUNDLE in .env
+    env_file = Path(".env")
+    if not env_file.exists():
+        env_file = Path("advisory/.env")
+    if not env_file.exists():
+        env_file = Path.home() / "advisory" / ".env"
+
+    if env_file.exists():
+        content = env_file.read_text()
+        ssl_cert = f"SSL_CERT_FILE={ca_file}"
+        requests_ca = f"REQUESTS_CA_BUNDLE={ca_file}"
+
+        lines = content.split("\n")
+        new_lines = []
+        added_ssl = False
+        added_requests = False
+        for line in lines:
+            if line.startswith("SSL_CERT_FILE="):
+                new_lines.append(ssl_cert)
+                added_ssl = True
+            elif line.startswith("REQUESTS_CA_BUNDLE="):
+                new_lines.append(requests_ca)
+                added_requests = True
+            else:
+                new_lines.append(line)
+
+        if not added_ssl:
+            new_lines.append("")
+            new_lines.append("# SSL certificate (user-level CA trust store)")
+            new_lines.append(ssl_cert)
+            new_lines.append(requests_ca)
+
+        env_file.write_text("\n".join(new_lines) + "\n")
+        console.print(f"[green]Updated SSL vars in {env_file}[/green]")
+    else:
         console.print(Panel(
-            f"[yellow]Root access required to install CA certificate.[/yellow]\n\n"
-            f"Run the following command as root or with sudo:\n\n"
-            f"  sudo sh -c 'cat > {ca_file}' << 'EOF'\n"
-            f"{root_ca}\n"
-            f"EOF\n"
-            f"  sudo update-ca-certificates\n\n"
-            f"Or run this command directly:\n"
-            f"  sudo uv run python -m src.setup cert",
-            title="Permission Required",
+            f"[yellow].env file not found.[/yellow]\n\n"
+            f"Add these lines to your .env file:\n\n"
+            f"  SSL_CERT_FILE={ca_file}\n"
+            f"  REQUESTS_CA_BUNDLE={ca_file}",
+            title="Manual Step Required",
             border_style="yellow",
         ))
-    else:
-        # Install directly
-        ca_dir.mkdir(parents=True, exist_ok=True)
-        ca_file.write_text(root_ca + "\n")
-        console.print(f"[green]Certificate saved to {ca_file}[/green]")
 
-        try:
-            subprocess.run(
-                ["update-ca-certificates"],
-                capture_output=True, text=True, timeout=10,
-            )
-            console.print("[green]CA certificate installed successfully.[/green]")
-            console.print(
-                "[dim]Proxmox API connections will now verify with verify_ssl: true[/dim]"
-            )
-        except FileNotFoundError:
-            console.print(
-                "[yellow]update-ca-certificates not found. "
-                "On Debian/Ubuntu: apt install ca-certificates[/yellow]"
-            )
-            sys.exit(1)
+    console.print()
+    console.print(Panel(
+        "[green]Proxmox CA certificate installed (user-level).[/green]\n\n"
+        f"Certificate: {ca_file}\n\n"
+        "[yellow]Note:[/yellow] Proxmox's default self-signed CA cert may not include\n"
+        "the keyUsage extension required by modern Python/OpenSSL.\n"
+        "If SSL verification still fails, set [bold]verify_ssl: false[/bold]\n"
+        "in config.yaml (acceptable for homelab environments).",
+        title="Success",
+        border_style="green",
+    ))
 
 
 def cmd_verify() -> None:
@@ -179,8 +215,12 @@ def cmd_verify() -> None:
             console.print(f"[red]SSL verification failed[/red]")
             console.print(Panel(
                 "Your Proxmox host uses a self-signed certificate.\n\n"
-                "Fix: [bold]uv run python -m src.setup cert[/bold]\n"
-                "Or set verify_ssl: false in config.yaml (homelab only)",
+                "Fix options:\n"
+                "  1. [bold]uv run python -m src.setup cert[/bold] — install the Proxmox CA cert\n"
+                "  2. Set [bold]verify_ssl: false[/bold] in config.yaml (homelab only)\n\n"
+                "Note: Proxmox's default CA cert may not meet modern X.509\n"
+                "requirements (missing keyUsage extension). Option 2 is\n"
+                "acceptable for trusted homelab environments.",
                 title="SSL Certificate Error",
                 border_style="red",
             ))
@@ -211,7 +251,7 @@ def main() -> None:
         console.print(Panel(
             "Usage: uv run python -m src.setup <command>\n\n"
             "Commands:\n"
-            "  cert     Install Proxmox CA certificate to system trust store\n"
+            "  cert     Install Proxmox CA certificate (user-level, no root)\n"
             "  verify   Test Proxmox API + LLM connectivity\n"
             "  wizard   Interactive setup (not yet implemented)",
             title="pve-sentinel Setup",

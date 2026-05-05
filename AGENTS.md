@@ -105,7 +105,7 @@ uv run python -m src.setup verify    # Test Proxmox API + LLM connectivity
 uv run python -m src.setup wizard    # Interactive setup (future)
 ```
 
-The `cert` command uses `openssl s_client` to observe the TLS handshake on port 8006,
+The `cert` command fetches the Proxmox CA cert via `openssl s_client` and installs it to the user-level trust store.
 extracts the root CA cert from the chain, and installs it via `update-ca-certificates`.
 If run as non-root, it displays the exact sudo command needed.
 
@@ -199,3 +199,13 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `systemd/cve-scanner.timer` | Daily scan timer | ✅ Fixed |
 | `systemd/cve-digest.timer` | Weekly digest timer | ✅ Fixed |
 | `tests/` | 62 tests across 7 modules | ✅ Complete |
+
+## SSL Verification Note
+
+Proxmox VE's default self-signed CA certificate (`/etc/pve/pve-root-ca.pem`) does not
+include the `keyUsage` X.509 extension required by modern Python/OpenSSL (3.12+).
+This causes `CERTIFICATE_VERIFY_FAILED` even when the correct CA cert is installed.
+
+**Workaround:** Set `verify_ssl: false` in `config.yaml` (acceptable for homelab
+environments on trusted networks). The `src/setup.py cert` command is provided for
+environments where the Proxmox CA has been replaced with a standards-compliant cert.

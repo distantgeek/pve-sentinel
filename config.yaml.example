@@ -34,9 +34,8 @@ proxmox:
   # Token value from environment variable (never hardcoded)
   token_value_env: PROXMOX_TOKEN_VALUE
   node: ""                      # auto-detected if blank
-  verify_ssl: true              # Recommended: install Proxmox CA cert with:
-                                #   uv run python -m src.setup cert
-                                # Or set to false for homelab self-signed certs
+  verify_ssl: true              # Uses user-level CA trust store
+                                # Install: uv run python -m src.setup cert
 
 # ── CVE Scanner ────────────────────────────────────────────
 cve:

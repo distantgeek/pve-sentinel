@@ -258,14 +258,18 @@ class SentinelShell:
             return
 
         try:
-            # Build cached context for the LLM
+            # Build conversation history and system context for the LLM
+            history = self._get_conversation_history()
             context = self._build_chat_context()
 
             with self.console.status("[cyan]Thinking...[/cyan]"):
+                parts = []
+                if history:
+                    parts.append(history)
+                parts.append(f"User: {prompt}")
                 if context:
-                    full_prompt = f"{context}\n\nUser: {prompt}"
-                else:
-                    full_prompt = prompt
+                    parts.append(context)
+                full_prompt = "\n\n".join(parts)
                 response = self.client.ask(full_prompt)
 
             if response:
@@ -278,6 +282,26 @@ class SentinelShell:
         except Exception as e:
             self.console.print(f"[red]LLM error:[/red] {e}")
 
+    def _get_conversation_history(self) -> str:
+        """Get recent conversation history for LLM context injection."""
+        depth = self.config.get("storage", {}).get("conversation_history_depth", 10)
+        if depth <= 0:
+            return ""
+
+        messages = self.db.get_recent_conversations(depth)
+        if not messages:
+            return ""
+
+        parts = ["Recent conversation:"]
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            if len(content) > 500:
+                content = content[:500] + "... [truncated]"
+            parts.append(f"  {role.capitalize()}: {content}")
+
+        return "\n".join(parts)
+
     def _build_chat_context(self) -> str:
         """Build system context string from cached snapshots for chat injection."""
         snapshots = self.db.get_all_snapshots()
@@ -285,7 +309,7 @@ class SentinelShell:
             return ""
 
         parts = []
-        parts.append("System Context (cached from last /digest or /refresh):")
+        parts.append("Available system context — reference data only. Do NOT re-list findings unless asked.")
 
         if "repos" in snapshots:
             r = snapshots["repos"]["data"]

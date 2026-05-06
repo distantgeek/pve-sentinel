@@ -76,3 +76,7 @@ class TestValidationDirective:
         assert "curated package pipeline" in VALIDATION_DIRECTIVE
         assert "snapshot timestamp" in VALIDATION_DIRECTIVE
         assert "cached in your conversation" in VALIDATION_DIRECTIVE
+        assert "focus your response on that topic only" in VALIDATION_DIRECTIVE
+        assert "Do NOT re-list all findings" in VALIDATION_DIRECTIVE
+        assert "infer intent" in VALIDATION_DIRECTIVE
+        assert "conversation history provided above" in VALIDATION_DIRECTIVE

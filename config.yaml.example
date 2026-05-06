@@ -115,3 +115,9 @@ storage:
   scan_cache_ttl_hours: 24      # Hours before /digest runs a fresh scan
                                 # Cached results include CVE data + LLM summary
                                 # Use /digest force to bypass cache
+
+  # Conversation history (continuity for multi-turn LLM chat)
+  conversation_history_depth: 10  # Recent messages injected into each LLM prompt
+                                  # Higher = better continuity, more tokens
+                                  # Lower = cost savings, lighter local model load
+                                  # Set to 0 to disable conversation history

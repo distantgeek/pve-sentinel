@@ -396,7 +396,8 @@ class TestChatContextBuilder:
             },
         }
         result = shell._build_chat_context()
-        assert "System Context" in result
+        assert "Available system context" in result
+        assert "reference data only" in result
         assert "Repositories" in result
         assert "Health" in result
         assert "Services" in result
@@ -578,3 +579,92 @@ class TestScanCache:
         shell._cmd_digest(["/digest"])
 
         shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")
+
+
+# ── Conversation History Tests ─────────────────────────────────────
+
+
+class TestConversationHistory:
+    """Test conversation history injection for LLM context."""
+
+    @pytest.fixture
+    def shell(self):
+        """Create a shell with mocked dependencies."""
+        mock_config = {
+            "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
+            "proxmox": {},
+            "guardrails": {"enabled": True, "preset": "general"},
+            "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
+            "permissions": {"allowed_write_actions": [], "deny_always": []},
+        }
+        with patch("cli.load_config", return_value=mock_config), \
+             patch("cli.Database") as mock_db, \
+             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
+             patch("cli.ProxmoxTools", return_value=None), \
+             patch("cli.PermissionGate"):
+            from cli import SentinelShell
+            shell = SentinelShell()
+            shell.console = MagicMock()
+            shell.db = mock_db.return_value
+            yield shell
+
+    def test_history_injected_when_available(self, shell):
+        """Recent messages must appear in prompt."""
+        shell.db.get_recent_conversations.return_value = [
+            {"role": "user", "content": "What about repos?"},
+            {"role": "assistant", "content": "The repo config shows..."},
+        ]
+        result = shell._get_conversation_history()
+        assert "Recent conversation:" in result
+        assert "What about repos?" in result
+        assert "The repo config shows..." in result
+
+    def test_empty_history_returns_empty(self, shell):
+        """No history must return empty string."""
+        shell.db.get_recent_conversations.return_value = []
+        assert shell._get_conversation_history() == ""
+
+    def test_depth_zero_disables_history(self, shell):
+        """depth=0 must disable history."""
+        shell.config["storage"]["conversation_history_depth"] = 0
+        shell.db.get_recent_conversations.return_value = [
+            {"role": "user", "content": "test"},
+        ]
+        assert shell._get_conversation_history() == ""
+
+    def test_long_messages_truncated(self, shell):
+        """Messages over 500 chars must be truncated."""
+        long_msg = "x" * 600
+        shell.db.get_recent_conversations.return_value = [
+            {"role": "user", "content": long_msg},
+        ]
+        result = shell._get_conversation_history()
+        assert "[truncated]" in result
+        # Should not contain the full 600 chars
+        assert "x" * 501 not in result
+
+    def test_default_depth_from_config(self, shell):
+        """Default depth must come from config."""
+        shell.config["storage"]["conversation_history_depth"] = 3
+        shell.db.get_recent_conversations.return_value = [
+            {"role": "user", "content": "msg1"},
+            {"role": "assistant", "content": "msg2"},
+            {"role": "user", "content": "msg3"},
+            {"role": "assistant", "content": "msg4"},
+        ]
+        shell._get_conversation_history()
+        shell.db.get_recent_conversations.assert_called_with(3)
+
+    def test_system_context_label_is_reference_only(self, shell):
+        """System context must use reference-only label."""
+        shell.db.get_all_snapshots.return_value = {
+            "repos": {
+                "data": {"standard_repos": [], "warnings": [], "errors": []},
+                "updated_at": "2026-05-06T08:00:00Z",
+            },
+        }
+        result = shell._build_chat_context()
+        assert "Available system context" in result
+        assert "reference data only" in result
+        assert "Do NOT re-list findings" in result
+        assert "System Context (cached" not in result

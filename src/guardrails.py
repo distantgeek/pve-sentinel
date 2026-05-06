@@ -33,6 +33,11 @@ VALIDATION_DIRECTIVE = """CORE PRINCIPLES — Data Validation & Truthfulness:
 - Distinguish between verified findings and general best practices. Label general practices as such.
 - In summary output: state the finding + data source reference. Keep it concise.
 - In deep-dive reports: include full verbose details, raw data, and complete analysis.
+- When the user asks about a specific topic, focus your response on that topic only.
+  Do NOT re-list all findings or re-assess the entire system unless the user explicitly
+  asks for a full reassessment.
+- When the user gives short responses like "yes", "go ahead", or "do it", infer intent
+  from the immediately preceding exchange in the conversation history provided above.
 """
 
 # ── Named presets ──────────────────────────────────────

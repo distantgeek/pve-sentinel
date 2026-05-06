@@ -459,11 +459,85 @@ class SentinelShell:
             self.console.print(f"[red]History error:[/red] {e}")
 
     def _cmd_digest(self, parts: list[str]) -> None:
-        """Run full CVE scan and display LLM summary."""
+        """Run full CVE scan and display LLM summary, using cached results when fresh."""
         if not self.client:
             self.console.print("[yellow]LLM unavailable — scan results stored but not summarized.[/yellow]")
 
-        self.console.print("[cyan]Running CVE scan...[/cyan]")
+        force = len(parts) >= 2 and parts[1].lower() in ("force", "--force")
+        ttl_hours = self.config.get("storage", {}).get("scan_cache_ttl_hours", 24)
+
+        # Check for cached scan results
+        cached = self.db.get_snapshot("scan_results")
+        if not force and cached:
+            from datetime import datetime, timezone
+            try:
+                cached_ts = datetime.fromisoformat(cached["updated_at"].replace("Z", "+00:00"))
+                age_hours = (datetime.now(timezone.utc) - cached_ts).total_seconds() / 3600
+                if age_hours < ttl_hours:
+                    self._display_cached_digest(cached, age_hours)
+                    return
+            except (ValueError, KeyError):
+                pass  # Corrupted cache, fall through to fresh scan
+
+        self._run_fresh_digest()
+
+    def _display_cached_digest(self, cached: dict, age_hours: float) -> None:
+        """Display cached scan results and LLM summary."""
+        age_min = age_hours * 60
+        if age_hours >= 1:
+            age_str = f"{age_hours:.1f} hours"
+        else:
+            age_str = f"{age_min:.0f} minutes"
+
+        self.console.print(f"[dim]Using cached scan from {cached['updated_at']} ({age_str} old)[/dim]")
+
+        data = cached["data"]
+        host = data.get("host_result", {})
+        lxc = data.get("lxc_result", {})
+        repo_summary = data.get("repo_summary", "")
+
+        self.console.print(Panel(
+            f"Host scan: {host.get('cves_found', 0)} CVEs, {host.get('packages_checked', 0)} packages\n"
+            f"LXC scan:  {lxc.get('cves_matched', 0)} matches, {lxc.get('packages_checked', 0)} packages\n"
+            f"{repo_summary}\n"
+            f"Duration:  {host.get('duration', 0) + lxc.get('duration', 0):.1f}s",
+            title="Cached Scan Results",
+            border_style="dim",
+        ))
+
+        # Show matched CVEs if any
+        matched = lxc.get("matched_cves", [])
+        if matched:
+            table = Table(title="Matched CVEs (local packages)")
+            table.add_column("CVE ID", width=20)
+            table.add_column("Package", width=16)
+            table.add_column("Version", width=14)
+            table.add_column("Severity", width=10)
+            table.add_column("CVSS", width=6)
+
+            for m in matched[:20]:
+                sev = m.get("severity", "UNKNOWN")
+                color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(sev, "white")
+                table.add_row(
+                    m["cve_id"], m["package"], m["version"],
+                    Text(sev, style=color), str(m.get("cvss_score", "")),
+                )
+            self.console.print(table)
+            if len(matched) > 20:
+                self.console.print(f"[dim]... and {len(matched) - 20} more[/dim]")
+
+        # Display cached LLM summary
+        llm_summary = data.get("llm_summary", "")
+        if llm_summary:
+            self.console.print(Panel(
+                llm_summary + "\n\n[dim]Cached summary — ask a follow-up question for fresh analysis.[/dim]",
+                title="Cached LLM Summary",
+                border_style="dim",
+            ))
+
+    def _run_fresh_digest(self) -> None:
+        """Run a full CVE scan, cache results, and display LLM summary."""
+        self.console.print("[cyan]Running fresh CVE scan...[/cyan]")
         try:
             from src.cve_scanner import CVEScanner
 
@@ -572,8 +646,43 @@ class SentinelShell:
                         Text(sev, style=color), str(m.get("cvss_score", "")),
                     )
                 self.console.print(table)
+                if len(lxc_result["matched_cves"]) > 20:
+                    self.console.print(f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]")
+
+            # LLM summary
+            llm_summary = ""
+            if self.client and result["cves_found"] > 0:
+                with self.console.status("[cyan]Generating LLM summary...[/cyan]"):
+                    summary_prompt = (
+                        f"Summarize these CVE scan results and provide prioritized recommendations:\n"
+                        f"- {result['cves_found']} CVEs found\n"
+                        f"- {result['packages_checked']} packages checked\n"
+                        f"- Duration: {result['duration']:.1f}s"
+                    )
+                    if repo_context:
+                        summary_prompt += f"\n\nSystem context:\n{repo_context}"
+                    if health_context:
+                        summary_prompt += f"\n{health_context}"
+                    llm_summary = self.client.ask(summary_prompt)
+                if llm_summary:
+                    self.console.print(Markdown(llm_summary))
+
+            # Cache full scan results (including LLM summary)
+            from datetime import datetime, timezone
+            cache_payload = {
+                "host_result": result,
+                "lxc_result": lxc_result,
+                "llm_summary": llm_summary,
+                "repo_summary": repo_summary,
+            }
+            self.db.cache_snapshot("scan_results", cache_payload)
+
         except Exception as e:
-            self.console.print(f"[red]Scan error:[/red] {e}")
+            error_str = str(e)
+            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                self.console.print(_ssl_error_panel(e))
+            else:
+                self.console.print(f"[red]Scan error:[/red] {e}")
 
     def _cmd_refresh(self, parts: list[str]) -> None:
         """Update cached system context from Proxmox API."""
@@ -613,31 +722,6 @@ class SentinelShell:
                 self.console.print(_ssl_error_panel(e))
             else:
                 self.console.print(f"[red]Refresh error:[/red] {e}")
-                if len(lxc_result["matched_cves"]) > 20:
-                    self.console.print(f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]")
-
-            # LLM summary
-            if self.client and result["cves_found"] > 0:
-                with self.console.status("[cyan]Generating LLM summary...[/cyan]"):
-                    summary_prompt = (
-                        f"Summarize these CVE scan results and provide prioritized recommendations:\n"
-                        f"- {result['cves_found']} CVEs found\n"
-                        f"- {result['packages_checked']} packages checked\n"
-                        f"- Duration: {result['duration']:.1f}s"
-                    )
-                    if repo_context:
-                        summary_prompt += f"\n\nSystem context:\n{repo_context}"
-                    if health_context:
-                        summary_prompt += f"\n{health_context}"
-                    summary = self.client.ask(summary_prompt)
-                if summary:
-                    self.console.print(Markdown(summary))
-        except Exception as e:
-            error_str = str(e)
-            if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
-                self.console.print(_ssl_error_panel(e))
-            else:
-                self.console.print(f"[red]Scan error:[/red] {e}")
 
     def _cmd_cve(self, parts: list[str]) -> None:
         """CVE subcommands: check <pkg>, scan."""

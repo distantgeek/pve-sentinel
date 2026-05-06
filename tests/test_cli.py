@@ -400,3 +400,149 @@ class TestChatContextBuilder:
         assert "Repositories" in result
         assert "Health" in result
         assert "Services" in result
+
+
+# ── Scan Cache Tests ─────────────────────────────────────────────
+
+
+class TestScanCache:
+    """Test 24-hour scan cache behavior."""
+
+    @pytest.fixture
+    def shell(self):
+        """Create a shell with mocked dependencies."""
+        mock_config = {
+            "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
+            "proxmox": {},
+            "guardrails": {"enabled": True, "preset": "general"},
+            "storage": {"db_path": ":memory:", "scan_cache_ttl_hours": 24},
+            "permissions": {"allowed_write_actions": [], "deny_always": []},
+        }
+        with patch("cli.load_config", return_value=mock_config), \
+             patch("cli.Database") as mock_db, \
+             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
+             patch("cli.ProxmoxTools", return_value=None), \
+             patch("cli.PermissionGate"):
+            from cli import SentinelShell
+            shell = SentinelShell()
+            shell.console = MagicMock()
+            shell.db = mock_db.return_value
+            yield shell
+
+    def test_cache_hit_within_ttl(self, shell):
+        """Fresh cache (within TTL) must display cached results, not run scan."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        shell.db.get_snapshot.return_value = {
+            "updated_at": now,
+            "data": {
+                "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
+                "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0},
+                "llm_summary": "No critical issues found.",
+                "repo_summary": "Repos: pve-no-subscription",
+            },
+        }
+
+        shell._cmd_digest(["/digest"])
+
+        # Should display cached results
+        shell.console.print.assert_any_call(
+            "[dim]Using cached scan from {} (0 minutes old)[/dim]".format(now)
+        )
+        # Should NOT run a fresh scan (no "Running fresh CVE scan" message)
+        for call in shell.console.print.call_args_list:
+            assert "Running fresh CVE scan" not in str(call)
+
+    def test_cache_miss_triggers_fresh_scan(self, shell):
+        """Empty cache must trigger fresh scan."""
+        shell.db.get_snapshot.return_value = None
+
+        # Fresh scan will fail (no scanner), but should attempt it
+        shell._cmd_digest(["/digest"])
+
+        shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")
+
+    def test_force_bypasses_cache(self, shell):
+        """--force flag must bypass cache and run fresh scan."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        shell.db.get_snapshot.return_value = {
+            "updated_at": now,
+            "data": {
+                "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
+                "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0},
+                "llm_summary": "Cached summary.",
+                "repo_summary": "Repos: pve-no-subscription",
+            },
+        }
+
+        shell._cmd_digest(["/digest", "--force"])
+
+        shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")
+
+    def test_force_keyword_bypasses_cache(self, shell):
+        """'force' keyword (without --) must also bypass cache."""
+        shell.db.get_snapshot.return_value = {"updated_at": "2026-05-06T08:00:00Z", "data": {}}
+
+        shell._cmd_digest(["/digest", "force"])
+
+        shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")
+
+    def test_cached_digest_shows_summary_note(self, shell):
+        """Cached LLM summary must include 'ask a follow-up' note."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        shell.db.get_snapshot.return_value = {
+            "updated_at": now,
+            "data": {
+                "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
+                "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0, "matched_cves": []},
+                "llm_summary": "No critical issues found.",
+                "repo_summary": "Repos: pve-no-subscription",
+            },
+        }
+
+        shell._cmd_digest(["/digest"])
+
+        # Check that the cached summary panel includes the follow-up note
+        for call in shell.console.print.call_args_list:
+            args = str(call)
+            if "Cached LLM Summary" in args:
+                assert "Cached summary" in args
+                assert "ask a follow-up question" in args
+                break
+
+    def test_cached_digest_shows_matched_cves(self, shell):
+        """Cached digest must show matched CVEs table if present."""
+        from datetime import datetime, timezone
+        from rich.table import Table
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        shell.db.get_snapshot.return_value = {
+            "updated_at": now,
+            "data": {
+                "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
+                "lxc_result": {
+                    "cves_matched": 1,
+                    "packages_checked": 285,
+                    "duration": 1.0,
+                    "matched_cves": [
+                        {"cve_id": "CVE-2026-1234", "package": "openssl",
+                         "version": "3.0.0", "severity": "HIGH", "cvss_score": 7.5},
+                    ],
+                },
+                "llm_summary": "",
+                "repo_summary": "",
+            },
+        }
+
+        shell._cmd_digest(["/digest"])
+
+        # Should print a Table object (matched CVEs)
+        found_table = False
+        for call in shell.console.print.call_args_list:
+            args, kwargs = call
+            if args and isinstance(args[0], Table):
+                if args[0].title and "Matched CVEs" in str(args[0].title):
+                    found_table = True
+                    break
+        assert found_table, "Expected matched CVEs Table in cached digest output"

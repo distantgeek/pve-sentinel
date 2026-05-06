@@ -110,3 +110,8 @@ storage:
                                 # Recommendation: Enable for homelab, disable for large deployments
   db_size_threshold_mb: 100     # Warning threshold for DB size alerts
                                 # Info at 50MB, warning at 75MB, nag at 100MB+
+
+  # Scan result caching (avoids redundant API calls + LLM token costs)
+  scan_cache_ttl_hours: 24      # Hours before /digest runs a fresh scan
+                                # Cached results include CVE data + LLM summary
+                                # Use /digest force to bypass cache

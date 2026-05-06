@@ -326,7 +326,8 @@ class SentinelShell:
             h = snapshots["health"]["data"]
             ts = snapshots["health"]["updated_at"]
             parts.append(
-                f"  Health (cached {ts}): CPU {h.get('cpu_pct', '?')}%, "
+                f"  Node: {h.get('node', '?')} | Proxmox: {h.get('pveversion', '?')} | "
+                f"Health (cached {ts}): CPU {h.get('cpu_pct', '?')}%, "
                 f"RAM {h.get('mem_pct', '?')}%, RootFS {h.get('rootfs_pct', '?')}%, "
                 f"VMs={h.get('vm_count', '?')}, LXCs={h.get('lxc_count', '?')}"
             )

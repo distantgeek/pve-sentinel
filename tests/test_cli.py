@@ -347,6 +347,8 @@ class TestChatContextBuilder:
         shell.db.get_all_snapshots.return_value = {
             "health": {
                 "data": {
+                    "node": "kevbot-pve",
+                    "pveversion": "pve-manager/8.4.1",
                     "cpu_pct": 25.0,
                     "mem_pct": 60.0,
                     "rootfs_pct": 45.0,
@@ -357,6 +359,8 @@ class TestChatContextBuilder:
             }
         }
         result = shell._build_chat_context()
+        assert "Node: kevbot-pve" in result
+        assert "Proxmox: pve-manager/8.4.1" in result
         assert "CPU 25.0%" in result
         assert "RAM 60.0%" in result
 
@@ -386,7 +390,8 @@ class TestChatContextBuilder:
                 "updated_at": "2026-05-05T14:32:00Z",
             },
             "health": {
-                "data": {"cpu_pct": 10, "mem_pct": 50, "rootfs_pct": 30,
+                "data": {"node": "test-node", "pveversion": "pve-manager/8.4",
+                          "cpu_pct": 10, "mem_pct": 50, "rootfs_pct": 30,
                           "vm_count": 1, "lxc_count": 1},
                 "updated_at": "2026-05-05T14:32:00Z",
             },

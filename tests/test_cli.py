@@ -546,3 +546,35 @@ class TestScanCache:
                     found_table = True
                     break
         assert found_table, "Expected matched CVEs Table in cached digest output"
+
+    def test_naive_timestamp_is_handled_gracefully(self, shell):
+        """Naive timestamp (no timezone) must not crash — treated as UTC."""
+        shell.db.get_snapshot.return_value = {
+            "updated_at": "2026-05-06T08:30:00",  # No Z, no timezone — naive
+            "data": {
+                "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
+                "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0},
+                "llm_summary": "Cached summary.",
+                "repo_summary": "",
+            },
+        }
+
+        shell._cmd_digest(["/digest"])
+
+        # Should use cache (treated as UTC), not crash or run fresh scan
+        for call in shell.console.print.call_args_list:
+            args = str(call)
+            if "Using cached scan from" in args:
+                return
+        assert False, "Expected cached scan output, not fresh scan"
+
+    def test_malformed_timestamp_falls_through_to_fresh_scan(self, shell):
+        """Malformed timestamp must not crash — falls through to fresh scan."""
+        shell.db.get_snapshot.return_value = {
+            "updated_at": "not-a-timestamp",
+            "data": {},
+        }
+
+        shell._cmd_digest(["/digest"])
+
+        shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")

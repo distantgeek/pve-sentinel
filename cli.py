@@ -472,11 +472,13 @@ class SentinelShell:
             from datetime import datetime, timezone
             try:
                 cached_ts = datetime.fromisoformat(cached["updated_at"].replace("Z", "+00:00"))
+                if cached_ts.tzinfo is None:
+                    cached_ts = cached_ts.replace(tzinfo=timezone.utc)
                 age_hours = (datetime.now(timezone.utc) - cached_ts).total_seconds() / 3600
                 if age_hours < ttl_hours:
                     self._display_cached_digest(cached, age_hours)
                     return
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError):
                 pass  # Corrupted cache, fall through to fresh scan
 
         self._run_fresh_digest()

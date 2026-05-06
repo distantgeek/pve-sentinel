@@ -5,7 +5,9 @@ Interactive CLI with slash commands, LLM advisory chat, and permission-gated
 Proxmox API operations.
 """
 
+import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,7 @@ from src.guardrails import list_presets
 from src.opencode_client import OpenCodeClient
 from src.permission_gate import PermissionGate
 from src.proxmox_tools import ProxmoxTools
+from src.tools import execute_tool, get_tool_info
 from src.version import version_string
 
 # ── Constants ──────────────────────────────────────────────────────
@@ -34,7 +37,7 @@ from src.version import version_string
 HISTORY_FILE = str(Path.home() / ".config" / "pve-sentinel" / "cli_history")
 
 COMMANDS = {
-    "/digest": "Run full CVE scan and LLM summary (caches system context)",
+    "/digest": "Run full CVE scan and LLM summary (uses 24h cache; `force` bypasses)",
     "/cve check <pkg>": "Deep-dive a specific package",
     "/cve scan": "Run host-only CVE scan",
     "/health": "Full hypervisor health dashboard",
@@ -44,6 +47,7 @@ COMMANDS = {
     "/refresh [type]": "Update cached system context (repos/health/services/all)",
     "/db [subcmd]": "Database management: status/vacuum/prune/history",
     "/proxmox <action>": "Proxmox API operation (write = confirm)",
+    "/tools": "List available LLM tools and capabilities",
     "/guardrails [preset]": "Show or switch security framework preset",
     "/history": "Recent scan history",
     "/help": "Command reference",
@@ -237,6 +241,7 @@ class SentinelShell:
             "/health": self._cmd_health,
             "/refresh": self._cmd_refresh,
             "/db": self._cmd_db,
+            "/tools": self._cmd_tools,
             "/guardrails": self._cmd_guardrails,
             "/cve": self._cmd_cve,
             "/proxmox": self._cmd_proxmox,
@@ -250,7 +255,7 @@ class SentinelShell:
             self.console.print("Type [bold]/help[/bold] for available commands.")
 
     def _handle_chat(self, prompt: str) -> None:
-        """Send free-text input to LLM and display response."""
+        """Send free-text input to LLM and display response, with tool execution loop."""
         if not self.client:
             self.console.print(
                 "[yellow]LLM is not available. Set OPENCODE_GO_API_KEY to enable advisory chat.[/yellow]"
@@ -262,25 +267,105 @@ class SentinelShell:
             history = self._get_conversation_history()
             context = self._build_chat_context()
 
-            with self.console.status("[cyan]Thinking...[/cyan]"):
-                parts = []
-                if history:
-                    parts.append(history)
-                parts.append(f"User: {prompt}")
-                if context:
-                    parts.append(context)
-                full_prompt = "\n\n".join(parts)
-                response = self.client.ask(full_prompt)
+            # Assemble initial prompt
+            parts = []
+            if history:
+                parts.append(history)
+            parts.append(f"User: {prompt}")
+            if context:
+                parts.append(context)
+            full_prompt = "\n\n".join(parts)
 
-            if response:
+            # Tool execution loop (max 3 iterations)
+            max_iterations = 3
+            final_response = None
+
+            for i in range(max_iterations):
+                with self.console.status("[cyan]Thinking...[/cyan]"):
+                    response = self.client.ask(full_prompt)
+
+                if not response:
+                    break
+
+                # Check for tool request
+                tool_match = re.match(r'\[TOOL:(\w+)\]\s+(.*)', response.strip())
+                if not tool_match:
+                    final_response = response
+                    break  # No tool request, display response
+
+                tool_name, tool_args = tool_match.groups()
+
+                # Display tool execution to user
+                self.console.print(f"[dim]🔍 Executing {tool_name}: {tool_args}[/dim]")
+
+                # PermissionGate check
+                if not self._check_tool_permission(tool_name, tool_args):
+                    self.console.print("[yellow]Tool request denied.[/yellow]")
+                    break
+
+                # Execute tool
+                result = execute_tool(tool_name, tool_args, self.proxmox)
+
+                if result.get("success"):
+                    data_str = json.dumps(result["data"])
+                    data_size = len(data_str)
+                    # Count entries if it's a list
+                    entry_count = ""
+                    if isinstance(result["data"], list):
+                        entry_count = f" {len(result['data'])} entries,"
+                    self.console.print(
+                        f"[dim]✅ Retrieved{entry_count} {data_size} bytes[/dim]"
+                    )
+                else:
+                    self.console.print(f"[dim]❌ Error: {result['error']}[/dim]")
+                    # Ask user if they want to retry
+                    try:
+                        retry = self.session.prompt("[dim]Retry? (y/n): [/dim]").strip().lower()
+                    except (KeyboardInterrupt, EOFError):
+                        retry = "n"
+                    if retry != "y":
+                        break
+
+                # Cache tool result in conversation log
+                self.db.log_conversation("tool_result", json.dumps(result), topic="tool")
+
+                # Pass result back to LLM
+                full_prompt = (
+                    f"[TOOL_RESULT] {json.dumps(result)}\n\n"
+                    f"Analyze this data and respond to the user's original question: {prompt}"
+                )
+
+            # Display final response
+            if final_response:
+                self.console.print(Markdown(final_response))
+                self.db.log_conversation("user", prompt)
+                self.db.log_conversation("assistant", final_response)
+            elif response and not re.match(r'\[TOOL:', response.strip()):
+                # Last response was a tool request but loop ended — show it
                 self.console.print(Markdown(response))
-                # Log conversation
                 self.db.log_conversation("user", prompt)
                 self.db.log_conversation("assistant", response)
             else:
                 self.console.print("[yellow]No response from model.[/yellow]")
         except Exception as e:
             self.console.print(f"[red]LLM error:[/red] {e}")
+
+    def _check_tool_permission(self, tool_name: str, tool_args: str) -> bool:
+        """Check if tool request is allowed via PermissionGate.
+
+        Read operations (GET) are auto-approved. Write/destructive operations
+        are blocked — user must use /proxmox <action> for those.
+        """
+        if tool_name == "proxmox_api":
+            method = tool_args.split()[0].upper() if tool_args else ""
+            if method != "GET":
+                self.console.print(
+                    f"[yellow]Write/destructive operations ({method}) not allowed via tool.[/yellow]"
+                )
+                self.console.print("[dim]Use /proxmox <action> for write operations.[/dim]")
+                return False
+            return True  # Read operations auto-approved
+        return False
 
     def _get_conversation_history(self) -> str:
         """Get recent conversation history for LLM context injection."""
@@ -342,6 +427,10 @@ class SentinelShell:
                 f"  Services (cached {ts}): {running} running, "
                 f"dead={dead}"
             )
+
+        # Append available tools info
+        parts.append("")
+        parts.append(get_tool_info())
 
         return "\n".join(parts)
 
@@ -711,6 +800,29 @@ class SentinelShell:
             else:
                 self.console.print(f"[red]Scan error:[/red] {e}")
 
+    def _cmd_tools(self, parts: list[str]) -> None:
+        """List available LLM tools and their capabilities."""
+        from src.tools import TOOL_REGISTRY
+
+        table = Table(title="Available LLM Tools")
+        table.add_column("Tool", style="green", width=16)
+        table.add_column("Purpose")
+        table.add_column("Access", width=22)
+        table.add_column("Format", width=40)
+
+        for name, info in TOOL_REGISTRY.items():
+            table.add_row(
+                name,
+                info["purpose"],
+                info["access"],
+                info["format"],
+            )
+
+        self.console.print(table)
+        self.console.print()
+        self.console.print("[dim]Tools are requested by the LLM during conversation.[/dim]")
+        self.console.print("[dim]Write operations require /proxmox <action> with manual confirmation.[/dim]")
+
     def _cmd_refresh(self, parts: list[str]) -> None:
         """Update cached system context from Proxmox API."""
         if not self.proxmox:
@@ -889,7 +1001,19 @@ class SentinelShell:
             else:
                 api_path = "/".join(parts[1:])
                 result = self.proxmox.run_command(f"/{api_path}", method="get")
-                self.console.print(result)
+                data_str = json.dumps(result, indent=2)
+                data_size = len(data_str)
+                entry_count = ""
+                if isinstance(result, list):
+                    entry_count = f" — {len(result)} entries"
+                self.console.print(Panel(
+                    data_str,
+                    title=f"API Result: {'/'.join(parts[1:])}{entry_count} ({data_size} bytes)",
+                    border_style="cyan",
+                ))
+                self.console.print(
+                    "[dim]💡 Tip: Ask a follow-up question to analyze this data with the LLM.[/dim]"
+                )
         except PermissionError as e:
             self.console.print(f"[red]Permission denied:[/red] {e}")
         except Exception as e:

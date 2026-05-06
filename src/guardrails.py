@@ -38,6 +38,15 @@ VALIDATION_DIRECTIVE = """CORE PRINCIPLES — Data Validation & Truthfulness:
   asks for a full reassessment.
 - When the user gives short responses like "yes", "go ahead", or "do it", infer intent
   from the immediately preceding exchange in the conversation history provided above.
+- You CAN request data via structured tool requests. Python will execute them and pass
+  results back to you. Tool request format: [TOOL:proxmox_api] GET /nodes/{node}/path
+- When you receive [TOOL_RESULT] data, analyze it and respond to the user's original
+  question using that data. Do NOT re-request the same data.
+- You CANNOT execute write or destructive operations directly. For write operations,
+  tell the user to use /proxmox <action> which requires manual confirmation.
+- Available tools: proxmox_api (read-only GET requests only).
+- Maximum 3 tool requests per conversation turn. After 3 requests, provide your best
+  analysis with available data.
 """
 
 # ── Named presets ──────────────────────────────────────

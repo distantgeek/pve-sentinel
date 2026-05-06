@@ -673,3 +673,78 @@ class TestConversationHistory:
         assert "reference data only" in result
         assert "Do NOT re-list findings" in result
         assert "System Context (cached" not in result
+
+
+# ── Tool-Use Tests ─────────────────────────────────────────────
+
+
+class TestToolUse:
+    """Test tool-use pattern with PermissionGate."""
+
+    @pytest.fixture
+    def shell(self):
+        """Create a shell with mocked dependencies."""
+        mock_config = {
+            "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
+            "proxmox": {},
+            "guardrails": {"enabled": True, "preset": "general"},
+            "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
+            "permissions": {"allowed_write_actions": [], "deny_always": []},
+        }
+        with patch("cli.load_config", return_value=mock_config), \
+             patch("cli.Database") as mock_db, \
+             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
+             patch("cli.ProxmoxTools", return_value=None), \
+             patch("cli.PermissionGate"):
+            from cli import SentinelShell
+            shell = SentinelShell()
+            shell.console = MagicMock()
+            shell.db = mock_db.return_value
+            yield shell
+
+    def test_tool_request_pattern_detected(self):
+        """LLM tool request pattern must be detected by regex."""
+        import re
+        response = "[TOOL:proxmox_api] GET /nodes/kevbot-pve/apt/repositories"
+        match = re.match(r'\[TOOL:(\w+)\]\s+(.*)', response)
+        assert match is not None
+        assert match.group(1) == "proxmox_api"
+        assert match.group(2) == "GET /nodes/kevbot-pve/apt/repositories"
+
+    def test_read_operation_auto_approved(self, shell):
+        """GET requests must be auto-approved."""
+        assert shell._check_tool_permission("proxmox_api", "GET /nodes/test/path") is True
+
+    def test_write_operation_blocked(self, shell):
+        """POST requests must be blocked."""
+        assert shell._check_tool_permission("proxmox_api", "POST /nodes/test/path") is False
+
+    def test_delete_operation_blocked(self, shell):
+        """DELETE requests must be blocked."""
+        assert shell._check_tool_permission("proxmox_api", "DELETE /nodes/test/path") is False
+
+    def test_unknown_tool_denied(self, shell):
+        """Unknown tool names must be denied."""
+        assert shell._check_tool_permission("unknown_tool", "args") is False
+
+    def test_tool_registry_has_proxmox_api(self):
+        """Tool registry must include proxmox_api."""
+        from src.tools import TOOL_REGISTRY
+        assert "proxmox_api" in TOOL_REGISTRY
+        assert "purpose" in TOOL_REGISTRY["proxmox_api"]
+        assert "access" in TOOL_REGISTRY["proxmox_api"]
+        assert "format" in TOOL_REGISTRY["proxmox_api"]
+
+    def test_get_tool_info_returns_string(self):
+        """get_tool_info must return non-empty string."""
+        from src.tools import get_tool_info
+        info = get_tool_info()
+        assert isinstance(info, str)
+        assert len(info) > 50
+        assert "proxmox_api" in info
+
+    def test_tools_command_displays_table(self, shell):
+        """/tools must display tool table."""
+        shell._cmd_tools(["/tools"])
+        # Should have printed at least once (the table)
+        assert shell.console.print.call_count >= 1

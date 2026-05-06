@@ -223,6 +223,8 @@ class SentinelShell:
     def _handle_command(self, command: str) -> None:
         """Route slash commands to handlers."""
         parts = command.split()
+        if not parts:
+            return
         cmd = parts[0].lower()
 
         handlers = {
@@ -569,7 +571,9 @@ class SentinelShell:
                         m["cve_id"], m["package"], m["version"],
                         Text(sev, style=color), str(m.get("cvss_score", "")),
                     )
-        self.console.print(table)
+                self.console.print(table)
+        except Exception as e:
+            self.console.print(f"[red]Scan error:[/red] {e}")
 
     def _cmd_refresh(self, parts: list[str]) -> None:
         """Update cached system context from Proxmox API."""

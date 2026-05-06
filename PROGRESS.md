@@ -373,3 +373,124 @@ What needs to be built:
 - Standard tests: 97 passing (was 84)
 - Zero API overhead for all DB operations
 - SQLite does NOT require periodic re-indexing like MSSQL
+
+### 2026-05-06: CLI Syntax Fix + Test Suite
+
+**Bug: `cli.py` had unclosed `try` block and `table` print outside `if` block**
+- `SyntaxError: expected 'except' or 'finally' block` at `cli.py:572`
+- `_cmd_digest` try block was never closed — no `except` handler
+- `self.console.print(table)` was outside the `if lxc_result.get("matched_cves"):` block
+- Also found dead code in `_cmd_refresh` referencing `_cmd_digest` variables
+
+**Bug: `_handle_command("")` crashed with `IndexError`**
+- Empty string input caused `parts[0].lower()` to fail
+- Added `if not parts: return` guard
+
+**Created `tests/test_cli.py` — 27 tests**
+- Syntax/import checks (AST-based unclosed block detection)
+- Constants validation (banner, commands dict, slash commands)
+- SSL error panel rendering
+- Shell initialization (minimal config, full config, history dir permissions)
+- Command routing (all 12 slash commands)
+- Chat context builder (empty snapshots, repos, health, services, combined)
+
+**Results**
+- Total tests: 124 passing (97 + 27 new)
+- Caught the exact syntax error that was preventing CLI from loading
+
+### 2026-05-06: 24-Hour Scan Cache with LLM Summary Caching
+
+**Problem: `/digest` runs expensive scan + LLM summary every time, even if nothing changed**
+- NVD/MITRE/PVE-SA API calls are rate-limited and network-bound
+- LLM summary generation costs tokens
+- CVE data and system state don't change meaningfully within a day
+
+**Solution: Cache full scan results for 24 hours**
+- `_cmd_digest` checks `scan_results` snapshot before running
+- If within TTL: displays cached results + LLM summary with age indicator
+- If stale or `/digest force`: runs fresh scan, updates cache
+- Cache payload: host results, LXC results, LLM summary, repo summary
+- Configurable via `scan_cache_ttl_hours` in config.yaml (default 24)
+
+**UX: Clear cache status messaging**
+- Fresh cache: "Using cached scan from [timestamp] (6 hours old)"
+- Cached summary includes "Cached summary — ask a follow-up question for fresh analysis"
+- `/digest force` or `/digest --force` bypasses cache
+
+**Refactored `_cmd_digest` into two methods**
+- `_cmd_digest()`: cache check + routing
+- `_display_cached_digest()`: display cached results
+- `_run_fresh_digest()`: full scan + cache update
+- Removed dead code from `_cmd_refresh` (referenced `_cmd_digest` variables)
+
+**Tests (`tests/test_cli.py`)**
+- 6 new tests: cache hit within TTL, cache miss, force bypass (2 variants), summary note, matched CVEs
+
+**Results**
+- Total tests: 130 passing (was 124)
+
+### 2026-05-06: Timezone-Aware Scan Cache Fix
+
+**Bug: `TypeError: can't subtract offset-naive and offset-aware datetimes`**
+- Cached timestamps from older versions lacked timezone info
+- `datetime.fromisoformat()` returned naive datetime
+- Could not subtract from `datetime.now(timezone.utc)`
+
+**Fix**
+- Attach UTC tzinfo to naive timestamps: `cached_ts.replace(tzinfo=timezone.utc)`
+- Added `TypeError` to except clause for any comparison failures
+
+**Tests**
+- 2 new tests: naive timestamp handled gracefully, malformed timestamp falls through
+
+**Results**
+- Total tests: 132 passing (was 130)
+
+### 2026-05-06: Conversation History Injection + Focus Guardrails
+
+**Problem: LLM re-lists all findings on every message, loses context on "yes" responses**
+- System context (repos/health/services) was the FIRST thing in every prompt
+- LLM treated it as "here's what to talk about" each time
+- No conversation history passed — LLM had zero memory of prior exchanges
+- VALIDATION_DIRECTIVE had no "stay focused" principle
+
+**Solution: Three-part fix**
+
+**1. Conversation history injection**
+- `_get_conversation_history()` fetches last N messages from `conversation_log`
+- Default 10 messages (configurable via `conversation_history_depth`, 0 to disable)
+- Each message truncated to 500 chars to control token costs
+- Format: "Recent conversation: User: ... / Assistant: ..."
+
+**2. System context repositioned**
+- Moved to END of prompt (after user message + history)
+- Label changed to "Available system context — reference data only. Do NOT re-list findings unless asked."
+- No longer the dominant signal that triggers reassessment
+
+**3. VALIDATION_DIRECTIVE focus principles**
+- "When the user asks about a specific topic, focus your response on that topic only"
+- "Do NOT re-list all findings or re-assess the entire system unless explicitly asked"
+- "When the user gives short responses like 'yes', 'go ahead', infer intent from the immediately preceding exchange"
+
+**Prompt assembly order (new)**
+```
+Recent conversation:
+  User: Are you able to clean up the stale repos?
+  Assistant: Yes — the Proxmox API provides endpoints...
+
+User: yes please
+
+Available system context — reference data only. Do NOT re-list findings unless asked.
+  Repositories (cached ...): ...
+  Health (cached ...): ...
+  Services (cached ...): ...
+```
+
+**Tests**
+- 8 new tests: history injection, empty history, depth=0, truncation, config depth,
+  system context label, focus principles in guardrails (4 assertions)
+
+**Results**
+- Total tests: 138 passing (was 132)
+- Token cost: ~1000-2000 extra tokens per message (acceptable for GLM-5.1)
+- Configurable for cost-conscious users and lighter local model loads

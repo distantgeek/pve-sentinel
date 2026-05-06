@@ -13,11 +13,11 @@
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 97 passing (+13 env-gated conversation tests) |
+| Tests | `uv run pytest tests/` — 138 passing (+13 env-gated conversation tests) |
 | Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
 | Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
-| Version | 0.4.0 |
+| Version | 0.6.0 |
 
 ## Architecture
 
@@ -82,6 +82,8 @@ every guardrail preset (named and custom). It enforces data validation and truth
 - Distinguish verified findings from general best practices
 - Summary output: concise finding + source reference
 - Deep-dive reports: full verbose details, raw data, complete analysis
+- **Focus on topic** — when user asks about a specific topic, respond only on that topic. Do NOT re-list all findings or re-assess the entire system unless explicitly asked
+- **Infer intent** — when user gives short responses like "yes", "go ahead", infer intent from the immediately preceding exchange in conversation history
 
 **Single update point** — change `VALIDATION_DIRECTIVE` once, affects all presets.
 **Model-agnostic** — applies to any LLM plugged in via the OpenAI-compatible API.
@@ -108,7 +110,7 @@ Reference data at `src/framework_data/nist_csf_ai.yaml` (full CSF 2.0 structure 
 
 | Command | Description |
 |---------|-------------|
-| `/digest` | Run full CVE scan and LLM summary (caches system context) |
+| `/digest` | Run full CVE scan and LLM summary (uses 24h cache; `force` bypasses) |
 | `/cve check <pkg>` | Deep-dive a specific package's CVEs |
 | `/cve scan` | Run host-only CVE scan |
 | `/health` | Full hypervisor health dashboard |
@@ -126,10 +128,13 @@ Reference data at `src/framework_data/nist_csf_ai.yaml` (full CSF 2.0 structure 
 | `/help` | Command reference |
 | `/quit` | Exit the shell |
 
-Free-text input is sent directly to the LLM for advisory chat. System context
-(repos, health, services) is cached during `/digest` or `/refresh` and injected
-into every chat message with timestamp attribution. Conversation history is
-logged to SQLite with topic extraction for retrieval.
+Free-text input is sent directly to the LLM for advisory chat. Each prompt includes:
+1. **Recent conversation history** (last 10 messages, configurable) for continuity
+2. **User message** (the current prompt)
+3. **System context** (repos, health, services — reference only, at end of prompt)
+
+Conversation history is logged to SQLite with topic extraction for retrieval.
+The LLM is instructed to stay focused on the user's topic and not re-list all findings.
 
 ## Setup Helper
 
@@ -177,6 +182,9 @@ Profile.d fallback: `/etc/profile.d/pve-sentinel.sh`.
 10. **SSH key separation** — `id_ed25519_pve-sentinel` for LXC access, `id_ed25519_proxmox` for Proxmox host.
 11. **API-only Proxmox access** — `proxmox_tools.py` uses `proxmoxer` API exclusively. No `pvesh` subprocess calls for host packages, repos, or run_command. Least-privilege: no root needed on Proxmox host.
 12. **VALIDATION_DIRECTIVE as "Soul"** — Single constant for core LLM truthfulness principles. One update point, affects all guardrails. Prevents false positives by requiring data verification before making claims.
+13. **Conversation history injection** — Last 10 messages (configurable) injected into each LLM prompt for multi-turn continuity. 500-char truncation per message to control token costs.
+14. **24-hour scan cache** — `/digest` uses cached results (CVE data + LLM summary) within 24h TTL. `/digest force` bypasses cache. Avoids redundant API calls and LLM token costs.
+15. **System context at end of prompt** — Cached repos/health/services placed after user message, labeled "reference data only" to prevent LLM from re-assessing everything on each turn.
 
 ## Security Hardening (Phase 0)
 
@@ -285,7 +293,7 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |
 | `systemd/cve-digest.timer` | Weekly digest timer (Mon 08:00 UTC) | ✅ Phase 5 |
-| `tests/` | 68 tests across 7 modules | ✅ Complete |
+| `tests/` | 138 tests across 11 modules | ✅ Complete |
 
 ## On-LXC File Locations
 

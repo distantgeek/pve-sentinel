@@ -90,7 +90,7 @@ def _ssl_error_panel(error: Exception) -> Panel:
 class SentinelShell:
     """Interactive REPL for pve-sentinel."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.console = Console()
         self.config = self._load_config()
         self.db = Database(self.config.get("storage", {}).get("db_path", "sentinel.db"))
@@ -104,7 +104,7 @@ class SentinelShell:
 
         # Prompt toolkit session
         self.completer = WordCompleter(SLASH_COMMANDS, ignore_case=True)
-        self.session = PromptSession(
+        self.session: PromptSession = PromptSession(
             completer=self.completer,
             history=FileHistory(HISTORY_FILE),
             style=Style.from_dict({

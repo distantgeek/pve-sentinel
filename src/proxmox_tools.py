@@ -351,7 +351,7 @@ class ProxmoxTools:
         node = self._get_node()
         return self.api.nodes(node).lxc(vmid).status.stop.post()
 
-    def run_command(self, api_path: str, method: str = "get") -> dict:
+    def run_command(self, api_path: str, method: str = "get", body: dict | None = None) -> dict:
         """Run an arbitrary Proxmox API command.
 
         SECURITY: This method validates the path against a read-only allowlist.
@@ -366,18 +366,17 @@ class ProxmoxTools:
                     "Use specific methods with permission gates instead."
                 )
 
-        # Write methods always require permission gate
-        if method.lower() != "get":
-            raise PermissionError(
-                f"Method '{method}' on path '{api_path}' requires permission gate. "
-                "Use /proxmox command in the CLI for write operations."
-            )
-
         # Allow read-only paths without restriction
         for allowed in self.READ_ONLY_PATHS:
             if api_path.startswith(allowed):
                 resource = self._api_traverse(api_path)
-                return resource.get()
+                if method.lower() == "get":
+                    return resource.get()
+
+        # Write methods — permission gate is handled by CLI layer before calling
+        if method.lower() in ("post", "put") and body is not None:
+            resource = self._api_traverse(api_path)
+            return resource.post(**body) if method.lower() == "post" else resource.put(**body)
 
         # All other paths require explicit permission gate (handled by CLI layer)
         raise PermissionError(

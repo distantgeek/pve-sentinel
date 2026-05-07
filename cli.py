@@ -353,6 +353,10 @@ class SentinelShell:
                             break
 
                     # Execute sequentially with failure recovery
+                    if self.proxmox is None:
+                        self.console.print("[red]Proxmox not connected.[/red]")
+                        break
+
                     results = []
                     batch_aborted = False
                     for j, op in enumerate(operations):
@@ -1304,6 +1308,9 @@ class SentinelShell:
 
     def _health_dashboard(self) -> None:
         """Full hypervisor health dashboard."""
+        if self.proxmox is None:
+            self.console.print("[red]Proxmox not connected.[/red]")
+            return
         try:
             health = self.proxmox.get_health()
         except Exception as e:
@@ -1441,6 +1448,9 @@ class SentinelShell:
 
     def _health_rrd(self, args: list[str]) -> None:
         """Historical metrics from RRD."""
+        if self.proxmox is None:
+            self.console.print("[red]Proxmox not connected.[/red]")
+            return
         timeframe = args[0].lower() if args else "day"
         valid = {"hour", "day", "week", "month", "year"}
         if timeframe not in valid:
@@ -1484,6 +1494,9 @@ class SentinelShell:
 
     def _health_services(self) -> None:
         """All Proxmox services with status."""
+        if self.proxmox is None:
+            self.console.print("[red]Proxmox not connected.[/red]")
+            return
         try:
             services = self.proxmox.get_service_status()
         except Exception as e:

@@ -12,9 +12,9 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.config import load_config
-from src.database import Database
-from src.cve_scanner import CVEScanner
+from src.config import load_config  # noqa: E402
+from src.cve_scanner import CVEScanner  # noqa: E402
+from src.database import Database  # noqa: E402
 
 
 def main() -> None:

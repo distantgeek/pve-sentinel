@@ -6,7 +6,7 @@ Supports single API calls and batch operations with inline confirmation.
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # ── Constants ───────────────────────────────────────────────────────
 
@@ -106,7 +106,7 @@ def remove_from_user_blacklist(path: str) -> tuple[bool, str]:
 
 # ── Operation description ──────────────────────────────────────────
 
-def describe_api_operation(method: str, path: str, body: dict = None) -> str:
+def describe_api_operation(method: str, path: str, body: dict | None = None) -> str:
     """Generate human-readable description of an API operation."""
     body = body or {}
 
@@ -173,7 +173,7 @@ def validate_batch(operations: list) -> tuple[bool, str]:
 
 
 def execute_proxmox_api(
-    method: str, path: str, proxmox: Any, body: dict = None
+    method: str, path: str, proxmox: Any, body: dict | None = None
 ) -> dict[str, Any]:
     """Execute a Proxmox API call via proxmoxer.
 

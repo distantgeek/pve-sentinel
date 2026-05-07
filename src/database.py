@@ -3,8 +3,7 @@
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Optional
-
+from typing import ClassVar
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cves (
@@ -362,7 +361,7 @@ class Database:
                 (scan_type, new_cves, packages, duration),
             )
 
-    def get_last_scan_date(self, scan_type: str = "host") -> Optional[date]:
+    def get_last_scan_date(self, scan_type: str = "host") -> date | None:
         """Get the date of the last completed scan."""
         with self._connect() as conn:
             row = conn.execute(
@@ -405,7 +404,7 @@ class Database:
                 (snap_type, json.dumps(data)),
             )
 
-    def get_snapshot(self, snap_type: str) -> Optional[dict]:
+    def get_snapshot(self, snap_type: str) -> dict | None:
         """Get a cached system snapshot, or None if not found."""
         import json
         with self._connect() as conn:
@@ -516,7 +515,7 @@ class Database:
 
     # ── Conversation log ────────────────────────────────────
 
-    CONVERSATION_TOPICS = {
+    CONVERSATION_TOPICS: ClassVar[dict[str, list[str]]] = {
         "repositories": ["repo", "apt", "sources", "bookworm", "trixie", "subscription"],
         "cves": ["cve", "vuln", "patch", "update", "upgrade", "advisory"],
         "guests": ["vm", "lxc", "container", "guest", "pct", "qemu"],
@@ -567,7 +566,6 @@ class Database:
 
     def prune_conversations(self, days: int = 90) -> int:
         """Archive and remove conversations older than N days."""
-        import json
         with self._connect() as conn:
             # Archive
             conn.execute(

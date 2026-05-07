@@ -12,7 +12,7 @@ import re
 import subprocess
 import time
 from datetime import date, datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -29,12 +29,12 @@ class CVEScanner:
     def __init__(
         self,
         db: Database,
-        nvd_api_key: Optional[str] = None,
+        nvd_api_key: str | None = None,
         nvd_rate_limit: int = 5,
         mitre_enabled: bool = True,
         exploitdb_enabled: bool = True,
         pve_security_enabled: bool = True,
-        pve_sa_feed_url: Optional[str] = None,
+        pve_sa_feed_url: str | None = None,
     ):
         self.db = db
         self.nvd_api_key = nvd_api_key
@@ -53,9 +53,9 @@ class CVEScanner:
 
     def fetch_nvd_cves(
         self,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        severity: Optional[str] = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        severity: str | None = None,
     ) -> list[dict]:
         """Fetch CVEs from NVD within a date range.
 
@@ -71,10 +71,7 @@ class CVEScanner:
             end_date = date.today()
         if start_date is None:
             last = self.db.get_last_scan_date("host")
-            if last:
-                start_date = last
-            else:
-                start_date = end_date - timedelta(days=1)
+            start_date = last or end_date - timedelta(days=1)
 
         params: dict[str, Any] = {
             "pubStartDate": f"{start_date.isoformat()}T00:00:00.000",
@@ -259,7 +256,7 @@ class CVEScanner:
     def scan_host(
         self,
         packages: list[dict[str, str]],
-        start_date: Optional[date] = None,
+        start_date: date | None = None,
     ) -> dict[str, Any]:
         """Run a full host CVE scan pipeline.
 
@@ -341,7 +338,7 @@ class CVEScanner:
 
     # ── LXC Scan Pipeline ────────────────────────────────
 
-    def scan_lxc(self, lxc_id: str) -> Optional[dict[str, Any]]:
+    def scan_lxc(self, lxc_id: str) -> dict[str, Any] | None:
         """Scan a single LXC's package inventory against CVE database.
 
         Requires pct exec access (always available for LXCs).
@@ -500,7 +497,6 @@ class CVEScanner:
         # Extract all advisory blocks
         # Look for table rows containing PVE-SA references
         rows = html.split("\n")
-        current_advisory = None
 
         for line in rows:
             # Match advisory ID
@@ -572,7 +568,7 @@ class CVEScanner:
 
     # ── Proxmox PVE-SA Check ─────────────────────────────
 
-    def _check_pve_patch_status(self, cve_id: str, package: str) -> Optional[dict]:
+    def _check_pve_patch_status(self, cve_id: str, package: str) -> dict | None:
         """Check if Proxmox has released a patch for this CVE.
 
         Queries the pve-security advisory database (local cache).

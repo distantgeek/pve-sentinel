@@ -4,10 +4,9 @@ Uses proxmoxer for API communication. All write operations pass through
 the permission gate before execution.
 """
 
-import json
 from typing import Any
 
-from proxmoxer import ProxmoxAPI
+from proxmoxer import ProxmoxAPI  # type: ignore[import-untyped]
 
 
 class ProxmoxTools:
@@ -312,7 +311,7 @@ class ProxmoxTools:
 
         try:
             result = subprocess.run(
-                ["pct", "exec", str(lxc_id), "--"] + cmd,
+                ["pct", "exec", str(lxc_id), "--", *cmd],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0 and result.stdout.strip():

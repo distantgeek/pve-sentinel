@@ -343,7 +343,7 @@ pve-sentinel adheres to three security frameworks:
 ### LLM-Assisted Coding Policy
 
 1. All LLM-generated code is reviewed before merge
-2. All code passes `bandit` security scanning
+2. All code passes `ruff` linting, `mypy` type checking, and `bandit` security scanning
 3. New features include corresponding tests
 4. All code must comply with OWASP and CIS standards
 5. LLM-assisted commits are documented in commit messages
@@ -351,6 +351,13 @@ pve-sentinel adheres to three security frameworks:
 ### Security Scanning
 
 ```bash
+# Run ruff linter + formatter
+uv run ruff check src/ cli.py
+uv run ruff format --check src/ cli.py
+
+# Run mypy type checker
+uv run mypy src/ cli.py
+
 # Run bandit security scanner
 uv run bandit src/ -r --severity-level medium
 

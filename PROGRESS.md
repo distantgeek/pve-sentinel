@@ -494,3 +494,50 @@ Available system context — reference data only. Do NOT re-list findings unless
 - Total tests: 138 passing (was 132)
 - Token cost: ~1000-2000 extra tokens per message (acceptable for GLM-5.1)
 - Configurable for cost-conscious users and lighter local model loads
+
+## 2026-05-07: Quality Control Tooling
+
+### ruff + mypy + bandit setup ✅ Complete
+
+**Added to dev dependencies**
+- `ruff>=0.9,<1` — Fast Python linter and formatter
+- `mypy>=1.15,<2` — Static type checker
+- `types-PyYAML>=6.0,<7` — Type stubs for PyYAML
+
+**ruff configuration** (`pyproject.toml`)
+- Target: Python 3.12
+- Rules: E, F, W, I, N, UP, B, SIM, RUF
+- Line length: 100
+- Auto-fixable: 45 of 60 issues fixed automatically
+
+**mypy configuration** (`pyproject.toml`)
+- Python version: 3.12
+- `ignore_missing_imports = true` (for untyped third-party libs)
+- `check_untyped_defs = true`
+- `warn_return_any = true`
+- `strict_optional = true`
+
+**Issues fixed**
+- 45 auto-fixed by ruff (unused imports, import sorting, f-string cleanup, UTC alias)
+- 15 manual fixes:
+  - Unused loop variables renamed to `_i`, `_k`
+  - `zip()` given `strict=True` parameter
+  - Ternary operators for simple if-else blocks
+  - Unused variable `current_advisory` removed
+  - `ClassVar` annotation for `CONVERSATION_TOPICS`
+  - List unpacking instead of concatenation
+  - `# noqa: E402` for intentional post-sys.path imports
+  - Implicit `Optional` → explicit `T | None`
+  - `Callable[[str], bool]` → `Callable[[str, str], bool]` (type fix)
+  - Keyword args → positional args for mypy compatibility
+  - `# type: ignore[import-untyped]` for proxmoxer
+
+**Results**
+- ruff: All checks passed (0 errors)
+- mypy: No errors (0 issues)
+- bandit: 0 medium/high issues (14 low — intentional patterns)
+- pytest: 165 passed (unchanged)
+
+**Updated documentation**
+- `AGENTS.md`: Added ruff/mypy commands to Security Scanning section
+- `AGENTS.md`: Updated LLM-Assisted Coding Policy to include ruff + mypy

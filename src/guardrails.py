@@ -4,7 +4,6 @@ Defines system prompts that constrain the advisory LLM to a specific
 security framework. Select a preset in config.yaml or provide a custom prompt.
 """
 
-from typing import Optional
 
 # ── Core Validation Directive ("Soul") ─────────────────
 # Single source of truth for data validation and truthfulness principles.
@@ -128,8 +127,8 @@ Tone: practical, technically precise, concise. Never recommend disabling securit
 
 
 def get_system_prompt(
-    preset: Optional[str] = None,
-    custom: Optional[str] = None,
+    preset: str | None = None,
+    custom: str | None = None,
 ) -> str:
     """Get the security guardrail system prompt.
 

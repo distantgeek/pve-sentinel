@@ -6,8 +6,8 @@ Read operations are auto-approved. Destructive operations require a random token
 
 import secrets
 import string
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable
 
 
 class ActionLevel(Enum):
@@ -41,7 +41,7 @@ class PermissionGate:
         self,
         allowed_write: set[str] | None = None,
         deny_always: set[str] | None = None,
-        confirm_callback: Callable[[str], bool] | None = None,
+        confirm_callback: Callable[[str, str], bool] | None = None,
     ):
         self.allowed_write = allowed_write or set(WRITE_ACTIONS)
         self.deny_always = deny_always or set(DENY_ALWAYS)
@@ -90,14 +90,14 @@ class PermissionGate:
                 f"  {detail}\n\n"
                 f"  Type CONFIRM-{token} to proceed: "
             )
-            return self._confirm_callback(prompt, expected=f"CONFIRM-{token}")
+            return self._confirm_callback(prompt, f"CONFIRM-{token}")
 
         prompt = (
             f"\n  Write operation: {action}\n"
             f"  {detail}\n\n"
             f"  Type 'confirm' to proceed: "
         )
-        return self._confirm_callback(prompt, expected="confirm")
+        return self._confirm_callback(prompt, "confirm")
 
     def _generate_token(self, length: int = 6) -> str:
         """Generate a cryptographically secure confirmation token."""

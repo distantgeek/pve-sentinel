@@ -5,7 +5,7 @@ so operators can verify they're running the latest build.
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Static version from pyproject.toml — update on each release
 VERSION = "0.5.0"
@@ -31,6 +31,6 @@ def version_string() -> str:
 
 def write_build_ts() -> None:
     """Write current UTC timestamp to the build timestamp file."""
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(BUILD_TS_FILE, "w", encoding="utf-8") as f:
         f.write(ts)

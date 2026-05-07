@@ -172,7 +172,7 @@ def cmd_verify() -> None:
     except Exception as e:
         error_str = str(e)
         if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
-            console.print(f"[red]SSL verification failed[/red]")
+            console.print("[red]SSL verification failed[/red]")
             console.print(Panel(
                 "Your Proxmox host uses a self-signed certificate.\n\n"
                 "Fix options:\n"

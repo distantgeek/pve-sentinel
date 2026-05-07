@@ -5,8 +5,6 @@ No opencode serve or CLI needed.
 """
 
 import os
-from pathlib import Path
-from typing import Optional
 
 import httpx
 
@@ -42,8 +40,8 @@ class OpenCodeClient:
         model: str = "",
         provider: str = "opencode-go",
         timeout: float = 120.0,
-        guardrail_preset: Optional[str] = None,
-        guardrail_custom: Optional[str] = None,
+        guardrail_preset: str | None = None,
+        guardrail_custom: str | None = None,
     ):
         self.api_key = api_key or os.environ.get("OPENCODE_GO_API_KEY", "")
         if not self.api_key:
@@ -55,7 +53,7 @@ class OpenCodeClient:
         self.model = model or DEFAULT_MODELS.get(provider, "glm-5.1")
         self._guardrail_preset = guardrail_preset
         self._guardrail_custom = guardrail_custom
-        self._system_prompt: Optional[str] = None
+        self._system_prompt: str | None = None
         base_url = os.environ.get("OPENCODE_GO_BASE", PROVIDER_BASE_URLS.get(provider, OPENCODE_GO_BASE))
         self._client = httpx.Client(
             base_url=base_url,

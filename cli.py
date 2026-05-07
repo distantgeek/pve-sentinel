@@ -6,12 +6,10 @@ Proxmox API operations.
 """
 
 import json
-import os
 import re
 import sys
-from datetime import datetime
+from datetime import UTC
 from pathlib import Path
-from typing import Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -132,7 +130,7 @@ class SentinelShell:
                 "storage": {"db_path": "sentinel.db"},
             }
 
-    def _init_client(self) -> Optional[OpenCodeClient]:
+    def _init_client(self) -> OpenCodeClient | None:
         """Initialize OpenCode Go client, or None if API key missing."""
         try:
             guard = self.config.get("guardrails", {})
@@ -150,7 +148,7 @@ class SentinelShell:
             ))
             return None
 
-    def _init_proxmox(self) -> Optional[ProxmoxTools]:
+    def _init_proxmox(self) -> ProxmoxTools | None:
         """Initialize Proxmox API client, or None if config incomplete."""
         pmx = self.config.get("proxmox", {})
         if not pmx.get("host") or not pmx.get("token_value"):
@@ -282,7 +280,7 @@ class SentinelShell:
             max_iterations = 3
             final_response = None
 
-            for i in range(max_iterations):
+            for _i in range(max_iterations):
                 with self.console.status("[cyan]Thinking...[/cyan]"):
                     response = self.client.ask(full_prompt)
 
@@ -300,7 +298,11 @@ class SentinelShell:
                         break
 
                     # Validate batch
-                    from src.tools import validate_batch, describe_api_operation, DESTRUCTIVE_METHODS
+                    from src.tools import (
+                        DESTRUCTIVE_METHODS,
+                        describe_api_operation,
+                        validate_batch,
+                    )
                     valid, error = validate_batch(operations)
                     if not valid:
                         self.console.print(f"[red]Batch validation failed: {error}[/red]")
@@ -408,7 +410,7 @@ class SentinelShell:
                                     break  # Continue to next operation
                                 elif choice == "3":
                                     # Mark remaining as aborted
-                                    for k in range(j + 1, len(operations)):
+                                    for _k in range(j + 1, len(operations)):
                                         results.append(
                                             {"success": False, "error": "aborted by user"}
                                         )
@@ -431,7 +433,7 @@ class SentinelShell:
                                     self.console.print(
                                         "[yellow]Invalid choice. Aborting.[/yellow]"
                                     )
-                                    for k in range(j + 1, len(operations)):
+                                    for _k in range(j + 1, len(operations)):
                                         results.append(
                                             {"success": False, "error": "aborted by user"}
                                         )
@@ -442,7 +444,7 @@ class SentinelShell:
                             break
 
                     # Log audit trail for each operation
-                    for j, (op, result) in enumerate(zip(operations, results)):
+                    for j, (op, result) in enumerate(zip(operations, results, strict=True)):
                         self.db.log_conversation(
                             "tool_audit",
                             json.dumps({
@@ -531,7 +533,7 @@ class SentinelShell:
         Read operations (GET) are auto-approved. Write/destructive operations
         require user confirmation. Blocked paths are rejected.
         """
-        from src.tools import is_path_blacklisted, describe_api_operation, DESTRUCTIVE_METHODS
+        from src.tools import DESTRUCTIVE_METHODS, describe_api_operation, is_path_blacklisted
 
         if tool_name == "proxmox_api":
             parts = tool_args.split(None, 1)
@@ -652,7 +654,7 @@ class SentinelShell:
         status = self.db.get_maintenance_status()
         level = status["level"]
         if level == "info":
-            self.console.print(f"[dim]ℹ DB: {status['size_mb']} MB — growing normally[/dim]")
+            self.console.print(f"[dim]ℹ DB: {status['size_mb']} MB — growing normally[/dim]")  # noqa: RUF001
         elif level == "warning":
             self.console.print(
                 f"[yellow]⚠ DB: {status['size_mb']} MB — consider /db prune to archive old unmatched CVEs[/yellow]"
@@ -796,12 +798,12 @@ class SentinelShell:
         # Check for cached scan results
         cached = self.db.get_snapshot("scan_results")
         if not force and cached:
-            from datetime import datetime, timezone
+            from datetime import datetime
             try:
                 cached_ts = datetime.fromisoformat(cached["updated_at"].replace("Z", "+00:00"))
                 if cached_ts.tzinfo is None:
-                    cached_ts = cached_ts.replace(tzinfo=timezone.utc)
-                age_hours = (datetime.now(timezone.utc) - cached_ts).total_seconds() / 3600
+                    cached_ts = cached_ts.replace(tzinfo=UTC)
+                age_hours = (datetime.now(UTC) - cached_ts).total_seconds() / 3600
                 if age_hours < ttl_hours:
                     self._display_cached_digest(cached, age_hours)
                     return
@@ -813,10 +815,7 @@ class SentinelShell:
     def _display_cached_digest(self, cached: dict, age_hours: float) -> None:
         """Display cached scan results and LLM summary."""
         age_min = age_hours * 60
-        if age_hours >= 1:
-            age_str = f"{age_hours:.1f} hours"
-        else:
-            age_str = f"{age_min:.0f} minutes"
+        age_str = f"{age_hours:.1f} hours" if age_hours >= 1 else f"{age_min:.0f} minutes"
 
         self.console.print(f"[dim]Using cached scan from {cached['updated_at']} ({age_str} old)[/dim]")
 
@@ -997,7 +996,6 @@ class SentinelShell:
                     self.console.print(Markdown(llm_summary))
 
             # Cache full scan results (including LLM summary)
-            from datetime import datetime, timezone
             cache_payload = {
                 "host_result": result,
                 "lxc_result": lxc_result,
@@ -1039,8 +1037,10 @@ class SentinelShell:
     def _cmd_blacklist(self, parts: list[str]) -> None:
         """Manage API path blacklist (list/add/remove)."""
         from src.tools import (
-            get_full_blacklist, add_to_user_blacklist,
-            remove_from_user_blacklist, BUILTIN_BLACKLIST,
+            BUILTIN_BLACKLIST,
+            add_to_user_blacklist,
+            get_full_blacklist,
+            remove_from_user_blacklist,
         )
 
         if len(parts) < 2:

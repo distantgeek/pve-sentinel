@@ -48,6 +48,7 @@ COMMANDS = {
     "/db [subcmd]": "Database management: status/vacuum/prune/history",
     "/proxmox <action>": "Proxmox API operation (write = confirm)",
     "/tools": "List available LLM tools and capabilities",
+    "/blacklist <subcmd>": "Manage API path blacklist (list/add/remove)",
     "/guardrails [preset]": "Show or switch security framework preset",
     "/history": "Recent scan history",
     "/help": "Command reference",
@@ -242,6 +243,7 @@ class SentinelShell:
             "/refresh": self._cmd_refresh,
             "/db": self._cmd_db,
             "/tools": self._cmd_tools,
+            "/blacklist": self._cmd_blacklist,
             "/guardrails": self._cmd_guardrails,
             "/cve": self._cmd_cve,
             "/proxmox": self._cmd_proxmox,
@@ -287,7 +289,180 @@ class SentinelShell:
                 if not response:
                     break
 
-                # Check for tool request
+                # Check for batch tool request first
+                batch_match = re.match(r'\[TOOL:(\w+)\]\s+BATCH\s+(.*)', response.strip(), re.DOTALL)
+                if batch_match:
+                    tool_name = batch_match.group(1)
+                    try:
+                        operations = json.loads(batch_match.group(2))
+                    except json.JSONDecodeError:
+                        self.console.print("[red]Invalid batch JSON.[/red]")
+                        break
+
+                    # Validate batch
+                    from src.tools import validate_batch, describe_api_operation, DESTRUCTIVE_METHODS
+                    valid, error = validate_batch(operations)
+                    if not valid:
+                        self.console.print(f"[red]Batch validation failed: {error}[/red]")
+                        break
+
+                    # Display operations
+                    steps_text = "\n".join(
+                        f"  Step {j+1}/{len(operations)}: {describe_api_operation(op.get('method', 'GET'), op.get('path', ''), op.get('body'))}"
+                        for j, op in enumerate(operations)
+                    )
+                    self.console.print(Panel(
+                        steps_text,
+                        title=f"⚠️ Batch operation requested — {len(operations)} steps",
+                        border_style="yellow",
+                    ))
+
+                    # Check for destructive operations
+                    has_destructive = any(
+                        op.get("method", "").upper() in DESTRUCTIVE_METHODS
+                        for op in operations
+                    )
+
+                    if has_destructive:
+                        destructive_count = sum(
+                            1 for op in operations
+                            if op.get("method", "").upper() in DESTRUCTIVE_METHODS
+                        )
+                        try:
+                            confirm = self.session.prompt(
+                                f"[red]⚠️ This batch contains {destructive_count} DESTRUCTIVE "
+                                f"operations that cannot be undone.\n"
+                                f"Type 'DELETE {destructive_count}' to confirm: [/red]"
+                            ).strip()
+                        except (KeyboardInterrupt, EOFError):
+                            confirm = ""
+                        if confirm != f"DELETE {destructive_count}":
+                            self.console.print("[dim]Operation cancelled.[/dim]")
+                            break
+                    else:
+                        try:
+                            confirm = self.session.prompt(
+                                "[yellow]Confirm all? (y/n): [/yellow]"
+                            ).strip().lower()
+                        except (KeyboardInterrupt, EOFError):
+                            confirm = "n"
+                        if confirm != "y":
+                            self.console.print("[dim]Operation cancelled.[/dim]")
+                            break
+
+                    # Execute sequentially with failure recovery
+                    results = []
+                    batch_aborted = False
+                    for j, op in enumerate(operations):
+                        method = op.get("method", "GET")
+                        path = op.get("path", "")
+                        body = op.get("body")
+                        max_retries = 1
+                        retries = 0
+
+                        while True:
+                            self.console.print(
+                                f"[dim]Executing Step {j+1}/{len(operations)}...[/dim]"
+                            )
+
+                            try:
+                                result = self.proxmox.run_command(
+                                    path, method=method.lower(), body=body
+                                )
+                                results.append({"success": True, "data": result})
+                                desc = describe_api_operation(method, path, body)
+                                short_desc = desc.split("—")[0].strip() if "—" in desc else desc
+                                self.console.print(
+                                    f"[green]✅ Step {j+1}/{len(operations)}: {short_desc}[/green]"
+                                )
+                                break
+                            except Exception as e:
+                                results.append({"success": False, "error": str(e)})
+                                self.console.print(
+                                    f"[red]❌ Step {j+1}/{len(operations)} failed: {e}[/red]"
+                                )
+
+                                # Prompt user for recovery
+                                try:
+                                    choice = self.session.prompt(
+                                        "\nOptions:\n"
+                                        "  1. Retry step (same parameters)\n"
+                                        "  2. Skip step, continue with remaining\n"
+                                        "  3. Abort entire batch\n"
+                                        "  4. Ask LLM for suggestions\n"
+                                        "\nChoose (1/2/3/4): "
+                                    ).strip()
+                                except (KeyboardInterrupt, EOFError):
+                                    choice = "3"
+
+                                if choice == "1":
+                                    if retries >= max_retries:
+                                        self.console.print(
+                                            "[yellow]Max retries reached. Choose another option.[/yellow]"
+                                        )
+                                        continue
+                                    retries += 1
+                                    # Loop continues to retry
+                                elif choice == "2":
+                                    self.console.print(f"[dim]Step {j+1} skipped.[/dim]")
+                                    break  # Continue to next operation
+                                elif choice == "3":
+                                    # Mark remaining as aborted
+                                    for k in range(j + 1, len(operations)):
+                                        results.append(
+                                            {"success": False, "error": "aborted by user"}
+                                        )
+                                    batch_aborted = True
+                                    break
+                                elif choice == "4":
+                                    # Pass partial results to LLM for suggestions
+                                    partial_results = results[: j + 1]
+                                    suggestion_prompt = (
+                                        f"Step {j+1} failed: {e}\n"
+                                        f"Partial results: {json.dumps(partial_results)}\n"
+                                        f"Suggest how to fix this. Do NOT execute — just provide guidance."
+                                    )
+                                    with self.console.status("[cyan]Getting suggestions...[/cyan]"):
+                                        suggestion = self.client.ask(suggestion_prompt)
+                                    if suggestion:
+                                        self.console.print(Markdown(suggestion))
+                                    # User decides next action — loop back to prompt
+                                else:
+                                    self.console.print(
+                                        "[yellow]Invalid choice. Aborting.[/yellow]"
+                                    )
+                                    for k in range(j + 1, len(operations)):
+                                        results.append(
+                                            {"success": False, "error": "aborted by user"}
+                                        )
+                                    batch_aborted = True
+                                    break
+
+                        if batch_aborted:
+                            break
+
+                    # Log audit trail for each operation
+                    for j, (op, result) in enumerate(zip(operations, results)):
+                        self.db.log_conversation(
+                            "tool_audit",
+                            json.dumps({
+                                "batch_index": j + 1,
+                                "method": op.get("method"),
+                                "path": op.get("path"),
+                                "confirmed": True,
+                                "result": "success" if result.get("success") else "error",
+                            }),
+                            topic="audit",
+                        )
+
+                    # Pass results back to LLM
+                    full_prompt = (
+                        f"[TOOL_RESULT] {json.dumps(results)}\n\n"
+                        f"Analyze the results and respond to the user's original question: {prompt}"
+                    )
+                    continue
+
+                # Check for single tool request
                 tool_match = re.match(r'\[TOOL:(\w+)\]\s+(.*)', response.strip())
                 if not tool_match:
                     final_response = response
@@ -354,17 +529,55 @@ class SentinelShell:
         """Check if tool request is allowed via PermissionGate.
 
         Read operations (GET) are auto-approved. Write/destructive operations
-        are blocked — user must use /proxmox <action> for those.
+        require user confirmation. Blocked paths are rejected.
         """
+        from src.tools import is_path_blacklisted, describe_api_operation, DESTRUCTIVE_METHODS
+
         if tool_name == "proxmox_api":
-            method = tool_args.split()[0].upper() if tool_args else ""
-            if method != "GET":
+            parts = tool_args.split(None, 1)
+            method = parts[0].upper() if parts else ""
+            path = parts[1] if len(parts) > 1 else ""
+
+            if method == "GET":
+                return True  # Read operations auto-approved
+
+            # Check blacklist
+            if is_path_blacklisted(path):
                 self.console.print(
-                    f"[yellow]Write/destructive operations ({method}) not allowed via tool.[/yellow]"
+                    f"[yellow]Path blocked: {path} is on the critical path blacklist.[/yellow]"
                 )
-                self.console.print("[dim]Use /proxmox <action> for write operations.[/dim]")
                 return False
-            return True  # Read operations auto-approved
+
+            # Show operation description and prompt for confirmation
+            desc = describe_api_operation(method, path)
+            self.console.print(Panel(
+                desc,
+                title="⚠️ Write operation requested",
+                border_style="yellow",
+            ))
+
+            if method in DESTRUCTIVE_METHODS:
+                try:
+                    confirm = self.session.prompt(
+                        "[red]⚠️ DESTRUCTIVE operation — type 'DELETE' to confirm: [/red]"
+                    ).strip()
+                except (KeyboardInterrupt, EOFError):
+                    confirm = ""
+                if confirm != "DELETE":
+                    self.console.print("[dim]Operation cancelled.[/dim]")
+                    return False
+            else:
+                try:
+                    confirm = self.session.prompt(
+                        "[yellow]Confirm? (y/n): [/yellow]"
+                    ).strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    confirm = "n"
+                if confirm != "y":
+                    self.console.print("[dim]Operation cancelled.[/dim]")
+                    return False
+
+            return True
         return False
 
     def _get_conversation_history(self) -> str:
@@ -822,6 +1035,51 @@ class SentinelShell:
         self.console.print()
         self.console.print("[dim]Tools are requested by the LLM during conversation.[/dim]")
         self.console.print("[dim]Write operations require /proxmox <action> with manual confirmation.[/dim]")
+
+    def _cmd_blacklist(self, parts: list[str]) -> None:
+        """Manage API path blacklist (list/add/remove)."""
+        from src.tools import (
+            get_full_blacklist, add_to_user_blacklist,
+            remove_from_user_blacklist, BUILTIN_BLACKLIST,
+        )
+
+        if len(parts) < 2:
+            self.console.print("[red]Usage:[/red] /blacklist list | add <path> | remove <path>")
+            return
+
+        subcmd = parts[1].lower()
+
+        if subcmd == "list":
+            full_list = get_full_blacklist()
+            table = Table(title="API Path Blacklist")
+            table.add_column("#", width=4)
+            table.add_column("Path", style="cyan")
+            table.add_column("Source", width=12)
+
+            for i, path in enumerate(full_list, 1):
+                source = "built-in" if path in BUILTIN_BLACKLIST else "user"
+                source_style = "dim" if source == "built-in" else "yellow"
+                table.add_row(str(i), path, Text(source, style=source_style))
+
+            self.console.print(table)
+            self.console.print(f"[dim]Total: {len(full_list)} paths ({len(BUILTIN_BLACKLIST)} built-in, {len(full_list) - len(BUILTIN_BLACKLIST)} user-added)[/dim]")
+
+        elif subcmd == "add" and len(parts) >= 3:
+            path = parts[2]
+            success, message = add_to_user_blacklist(path)
+            if success:
+                self.console.print(f"[green]✅ {message}[/green]")
+            else:
+                self.console.print(f"[yellow]⚠️ {message}[/yellow]")
+        elif subcmd == "remove" and len(parts) >= 3:
+            path = parts[2]
+            success, message = remove_from_user_blacklist(path)
+            if success:
+                self.console.print(f"[green]✅ {message}[/green]")
+            else:
+                self.console.print(f"[yellow]⚠️ {message}[/yellow]")
+        else:
+            self.console.print("[red]Usage:[/red] /blacklist list | add <path> | remove <path>")
 
     def _cmd_refresh(self, parts: list[str]) -> None:
         """Update cached system context from Proxmox API."""

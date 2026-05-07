@@ -10,7 +10,9 @@ and handler wiring — catching syntax errors and missing imports.
 
 import ast
 import importlib
+import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -747,4 +749,214 @@ class TestToolUse:
         """/tools must display tool table."""
         shell._cmd_tools(["/tools"])
         # Should have printed at least once (the table)
+        assert shell.console.print.call_count >= 1
+
+
+# ── Batch Operation Tests ─────────────────────────────────────
+
+
+class TestBatchOperations:
+    """Test batch operation pattern with PermissionGate."""
+
+    @pytest.fixture
+    def shell(self):
+        """Create a shell with mocked dependencies."""
+        mock_config = {
+            "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
+            "proxmox": {},
+            "guardrails": {"enabled": True, "preset": "general"},
+            "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
+            "permissions": {"allowed_write_actions": [], "deny_always": []},
+        }
+        with patch("cli.load_config", return_value=mock_config), \
+             patch("cli.Database") as mock_db, \
+             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
+             patch("cli.ProxmoxTools", return_value=None), \
+             patch("cli.PermissionGate"):
+            from cli import SentinelShell
+            shell = SentinelShell()
+            shell.console = MagicMock()
+            shell.db = mock_db.return_value
+            yield shell
+
+    def test_batch_pattern_detected(self):
+        """Batch tool request pattern must be detected."""
+        response = '[TOOL:proxmox_api] BATCH [{"method": "POST", "path": "/nodes/test/qemu", "body": {"vmid": 100}}]'
+        match = re.match(r'\[TOOL:(\w+)\]\s+BATCH\s+(.*)', response, re.DOTALL)
+        assert match is not None
+        assert match.group(1) == "proxmox_api"
+        operations = json.loads(match.group(2))
+        assert len(operations) == 1
+
+    def test_batch_max_operations(self):
+        """Batch exceeding max operations must be rejected."""
+        from src.tools import validate_batch, BATCH_OPERATIONS_MAX
+        ops = [{"method": "GET", "path": "/nodes/test/status"}] * (BATCH_OPERATIONS_MAX + 1)
+        valid, error = validate_batch(ops)
+        assert not valid
+        assert "exceeds maximum" in error
+
+    def test_batch_empty_rejected(self):
+        """Empty batch must be rejected."""
+        from src.tools import validate_batch
+        valid, error = validate_batch([])
+        assert not valid
+        assert "at least one" in error
+
+    def test_batch_not_list_rejected(self):
+        """Non-list batch must be rejected."""
+        from src.tools import validate_batch
+        valid, error = validate_batch({"method": "GET", "path": "/test"})
+        assert not valid
+        assert "JSON array" in error
+
+    def test_blacklist_rejection(self):
+        """Blacklisted paths must be rejected."""
+        from src.tools import validate_batch
+        ops = [{"method": "POST", "path": "/nodes/test/stop"}]
+        valid, error = validate_batch(ops)
+        assert not valid
+        assert "blacklist" in error.lower()
+
+    def test_firewall_blacklisted(self):
+        """Firewall paths must be blacklisted."""
+        from src.tools import is_path_blacklisted
+        assert is_path_blacklisted("/nodes/test/firewall") is True
+
+    def test_stop_blacklisted(self):
+        """Stop paths must be blacklisted."""
+        from src.tools import is_path_blacklisted
+        assert is_path_blacklisted("/nodes/test/stop") is True
+
+    def test_shutdown_blacklisted(self):
+        """Shutdown paths must be blacklisted."""
+        from src.tools import is_path_blacklisted
+        assert is_path_blacklisted("/nodes/test/shutdown") is True
+
+    def test_migrate_blacklisted(self):
+        """Migrate paths must be blacklisted."""
+        from src.tools import is_path_blacklisted
+        assert is_path_blacklisted("/nodes/test/migrate") is True
+
+    def test_permissions_blacklisted(self):
+        """Permissions paths must be blacklisted."""
+        from src.tools import is_path_blacklisted
+        assert is_path_blacklisted("/nodes/test/permissions") is True
+
+    def test_destructive_operation_flagged(self):
+        """DELETE operations must be flagged as destructive."""
+        from src.tools import describe_api_operation
+        desc = describe_api_operation("DELETE", "/nodes/test/qemu/100")
+        assert "DESTRUCTIVE" in desc
+
+    def test_vm_create_description(self):
+        """VM create operation must have readable description."""
+        from src.tools import describe_api_operation
+        desc = describe_api_operation("POST", "/nodes/test/qemu", {"vmid": 100, "name": "web-01", "cores": 4, "memory": 8192})
+        assert "web-01" in desc
+        assert "100" in desc
+        assert "4C" in desc
+
+    def test_lxc_create_description(self):
+        """LXC create operation must have readable description."""
+        from src.tools import describe_api_operation
+        desc = describe_api_operation("POST", "/nodes/test/lxc", {"vmid": 200, "hostname": "app-01", "cores": 2, "memory": 4096})
+        assert "app-01" in desc
+        assert "200" in desc
+
+    def test_network_create_description(self):
+        """Network create operation must have readable description."""
+        from src.tools import describe_api_operation
+        desc = describe_api_operation("POST", "/nodes/test/network", {"iface": "vmbr1"})
+        assert "vmbr1" in desc
+
+    def test_valid_batch_passes(self):
+        """Valid batch with mixed operations must pass validation."""
+        from src.tools import validate_batch
+        ops = [
+            {"method": "POST", "path": "/nodes/test/network", "body": {"iface": "vmbr1"}},
+            {"method": "POST", "path": "/nodes/test/qemu", "body": {"vmid": 100, "name": "web-01"}},
+            {"method": "GET", "path": "/nodes/test/status"},
+        ]
+        valid, error = validate_batch(ops)
+        assert valid
+        assert error == ""
+
+    def test_user_blacklist_add_remove(self):
+        """User blacklist add and remove must work."""
+        import tempfile
+        import os
+        from src.tools import (
+            USER_BLACKLIST_PATH, add_to_user_blacklist,
+            remove_from_user_blacklist, get_full_blacklist,
+            BUILTIN_BLACKLIST, _load_user_blacklist, _save_user_blacklist,
+        )
+        # Use a temp file for testing
+        original_path = USER_BLACKLIST_PATH
+        test_path = Path(tempfile.gettempdir()) / "test-blacklist.yaml"
+        import src.tools
+        src.tools.USER_BLACKLIST_PATH = test_path
+
+        try:
+            # Clean up any existing test file
+            if test_path.exists():
+                test_path.unlink()
+
+            # Add a path
+            success, msg = add_to_user_blacklist("/custom/blocked")
+            assert success
+            assert "Added" in msg
+
+            # Verify it's in the full blacklist
+            full = get_full_blacklist()
+            assert "/custom/blocked" in full
+
+            # Duplicate add must fail
+            success, msg = add_to_user_blacklist("/custom/blocked")
+            assert not success
+            assert "already blacklisted" in msg.lower()
+
+            # Remove it
+            success, msg = remove_from_user_blacklist("/custom/blocked")
+            assert success
+            assert "Removed" in msg
+
+            # Verify it's gone
+            full = get_full_blacklist()
+            assert "/custom/blocked" not in full
+
+            # Remove built-in must fail
+            success, msg = remove_from_user_blacklist("/stop")
+            assert not success
+            assert "built-in" in msg.lower()
+
+            # Remove non-existent must fail
+            success, msg = remove_from_user_blacklist("/nonexistent")
+            assert not success
+            assert "not in the user blacklist" in msg.lower()
+        finally:
+            # Restore original path
+            src.tools.USER_BLACKLIST_PATH = original_path
+            if test_path.exists():
+                test_path.unlink()
+
+    def test_blacklist_list_command(self, shell):
+        """/blacklist list must display all paths."""
+        shell._cmd_blacklist(["/blacklist", "list"])
+        assert shell.console.print.call_count >= 1
+
+    def test_blacklist_add_command(self, shell):
+        """/blacklist add must add a path."""
+        shell._cmd_blacklist(["/blacklist", "add", "/test/path"])
+        # Should have printed success or duplicate message
+        assert shell.console.print.call_count >= 1
+        # Clean up
+        from src.tools import remove_from_user_blacklist
+        remove_from_user_blacklist("/test/path")
+
+    def test_blacklist_remove_command(self, shell):
+        """/blacklist remove must remove a path."""
+        from src.tools import add_to_user_blacklist, remove_from_user_blacklist
+        add_to_user_blacklist("/test/remove-me")
+        shell._cmd_blacklist(["/blacklist", "remove", "/test/remove-me"])
         assert shell.console.print.call_count >= 1

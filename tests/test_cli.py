@@ -793,6 +793,67 @@ class TestToolUse:
         """Unknown tool names must be denied."""
         assert shell._check_tool_permission("unknown_tool", "args") is False
 
+    def test_management_mode_allows_blocked_write(self, shell):
+        """In management mode, a blacklisted endpoint is confirmable."""
+        shell.management_mode = True
+        shell.session = MagicMock()
+        shell.session.prompt.return_value = "y"
+        assert shell._check_tool_permission("proxmox_api", "POST /nodes/test/stop") is True
+
+    def test_management_mode_delete_requires_typed_confirm(self, shell):
+        """In management mode, DELETE still requires typing DELETE."""
+        shell.management_mode = True
+        shell.session = MagicMock()
+        shell.session.prompt.return_value = "DELETE"
+        assert shell._check_tool_permission("proxmox_api", "DELETE /nodes/test/qemu/100") is True
+
+    def test_management_mode_delete_denied_without_typed_confirm(self, shell):
+        """In management mode, DELETE is denied without the typed confirmation."""
+        shell.management_mode = True
+        shell.session = MagicMock()
+        shell.session.prompt.return_value = "y"
+        assert shell._check_tool_permission("proxmox_api", "DELETE /nodes/test/qemu/100") is False
+
+    def test_single_tool_post_body_parsing(self):
+        """Single POST with an inline JSON body must be parsed into path + body."""
+        from src.tools import execute_tool
+
+        mock_proxmox = MagicMock()
+        mock_proxmox.run_command.return_value = {"upid": "UPID:pve1:00000042"}
+
+        result = execute_tool(
+            "proxmox_api",
+            'POST /nodes/pve1/qemu {"vmid": 100, "name": "web-01"}',
+            mock_proxmox,
+        )
+        assert result["success"] is True
+        mock_proxmox.run_command.assert_called_once_with(
+            "/nodes/pve1/qemu",
+            method="post",
+            body={"vmid": 100, "name": "web-01"},
+            allow_destructive=False,
+        )
+
+    def test_single_tool_body_object_form(self):
+        """Full-object form {method, path, body} must be parsed correctly."""
+        from src.tools import execute_tool
+
+        mock_proxmox = MagicMock()
+        mock_proxmox.run_command.return_value = {"data": "ok"}
+
+        result = execute_tool(
+            "proxmox_api",
+            'POST {"method": "PUT", "path": "/nodes/pve1/qemu/100/config", "body": {"memory": 8192}}',
+            mock_proxmox,
+        )
+        assert result["success"] is True
+        mock_proxmox.run_command.assert_called_once_with(
+            "/nodes/pve1/qemu/100/config",
+            method="put",
+            body={"memory": 8192},
+            allow_destructive=False,
+        )
+
     def test_tool_registry_has_proxmox_api(self):
         """Tool registry must include proxmox_api."""
         from src.tools import TOOL_REGISTRY
@@ -889,7 +950,16 @@ class TestBatchOperations:
         ops = [{"method": "POST", "path": "/nodes/test/stop"}]
         valid, error = validate_batch(ops)
         assert not valid
-        assert "blacklist" in error.lower()
+        assert "blacklist" in error
+
+    def test_management_mode_bypasses_builtin_blacklist(self):
+        """In management mode the built-in blacklist is bypassed."""
+        from src.tools import validate_batch
+
+        ops = [{"method": "POST", "path": "/nodes/test/stop"}]
+        valid, error = validate_batch(ops, management_mode=True)
+        assert valid
+        assert error == "".lower()
 
     def test_firewall_blacklisted(self):
         """Firewall paths must be blacklisted."""

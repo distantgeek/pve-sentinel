@@ -90,7 +90,22 @@ permissions:
   # Read operations: auto-approved (always)
   # Write operations: require "confirm"
   # Destructive operations: require "CONFIRM-<random>"
-  
+
+  # Management mode — opt-in full API management.
+  #
+  #   false (default): critical endpoints (stop/reboot/resize/migrate/move/
+  #                    firewall/acl/user/group/permissions) and ALL DELETE
+  #                    operations are hard-blocked at the API boundary.
+  #   true:            those endpoints and DELETE become confirmable instead
+  #                    of hard-blocked. Every write still requires explicit
+  #                    "y" confirmation; DELETE still requires typing "DELETE".
+  #                    Path-level destructive keywords (destroy/delete/remove/
+  #                    unlink/purge) are ALWAYS blocked regardless of this flag.
+  #
+  # Only enable if you are comfortable approving VM/LXC/network/storage
+  # create, modify, and delete operations through the agent.
+  management_mode: false
+
   # Proxmox API token permissions (must match Proxmox ACL)
   allowed_write_actions:
     - "start"

@@ -44,12 +44,17 @@ DESTRUCTIVE_PATH_KEYWORDS = frozenset(
 class ProxmoxTools:
     """Read and (permission-gated) write operations on the Proxmox API."""
 
-    # Read-only API paths that bypass permission gates (GET only)
+    # Read-only API paths that bypass permission gates (GET only).
+    # Broad enough for management planning: node config, cluster resources,
+    # storage, pools, and access control listings are all read-only queries.
     READ_ONLY_PATHS = frozenset(
         {
             "/nodes",
             "/status",
-            "/cluster/status",
+            "/cluster",
+            "/storage",
+            "/pools",
+            "/access",
             "/version",
         }
     )
@@ -396,7 +401,13 @@ class ProxmoxTools:
         node = self._get_node()
         return self.api.nodes(node).lxc(vmid).status.stop.post()
 
-    def run_command(self, api_path: str, method: str = "get", body: dict | None = None) -> dict:
+    def run_command(
+        self,
+        api_path: str,
+        method: str = "get",
+        body: dict | None = None,
+        allow_destructive: bool = False,
+    ) -> dict:
         """Run an arbitrary Proxmox API command.
 
         SECURITY: This is the API execution boundary.
@@ -405,13 +416,19 @@ class ProxmoxTools:
         * POST/PUT require a body and must not target a destructive keyword
           or a blocked critical endpoint (defense-in-depth mirror of the
           CLI-level blacklist).
-        * DELETE is always rejected here; destructive operations must go
-          through dedicated, permission-gated methods.
+        * DELETE is rejected unless ``allow_destructive`` is True. The caller
+          (CLI layer) is responsible for obtaining explicit typed confirmation
+          before enabling it.
+
+        ``allow_destructive`` is the opt-in "management mode" escape hatch. When
+        True, critical endpoints (stop/reboot/resize/firewall/ACL/...) and DELETE
+        are permitted — but path-level destructive keywords (destroy/delete/
+        remove/unlink/purge) are always rejected regardless of this flag.
         """
         method_lower = method.lower()
         lower_path = api_path.lower()
 
-        # Block destructive paths entirely (any method)
+        # Block destructive paths entirely (any method, any mode)
         for keyword in DESTRUCTIVE_PATH_KEYWORDS:
             if keyword in lower_path:
                 raise PermissionError(
@@ -427,21 +444,25 @@ class ProxmoxTools:
                     return resource.get()
                 break
 
-        # DELETE is never permitted through the dynamic command path
+        # DELETE is only permitted in explicit management mode
         if method_lower == "delete":
-            raise PermissionError(
-                f"DELETE operations are not permitted through run_command ('{api_path}'). "
-                "Use specific methods with permission gates instead."
-            )
-
-        # Block critical endpoints for any mutating method (defense-in-depth;
-        # the CLI layer enforces the same list before confirmation)
-        for endpoint in BLOCKED_WRITE_ENDPOINTS:
-            if endpoint in lower_path:
+            if not allow_destructive:
                 raise PermissionError(
-                    f"Write operation blocked: '{endpoint}' in path '{api_path}' "
-                    "is on the critical path blacklist."
+                    f"DELETE operations are not permitted through run_command ('{api_path}'). "
+                    "Enable management mode and confirm explicitly to perform deletions."
                 )
+            resource = self._api_traverse(api_path)
+            return resource.delete(**body) if body else resource.delete()
+
+        # Block critical endpoints for any mutating method unless management
+        # mode is explicitly enabled (defense-in-depth mirror of the CLI list)
+        if not allow_destructive:
+            for endpoint in BLOCKED_WRITE_ENDPOINTS:
+                if endpoint in lower_path:
+                    raise PermissionError(
+                        f"Write operation blocked: '{endpoint}' in path '{api_path}' "
+                        "is on the critical path blacklist."
+                    )
 
         # Write methods — permission gate is handled by CLI layer before calling
         if method_lower in ("post", "put") and body is not None:

@@ -174,6 +174,10 @@ Profile.d fallback: `/etc/profile.d/pve-sentinel.sh`.
 2. **SQLite, no PostgreSQL** — Zero-maintenance, portable, full SQL for CVE queries.
 3. **Permission gate in Python layer** — Proxmox token never exposed to LLM.
 4. **Read-by-default, confirm-for-write** — Human-in-the-loop for all mutating operations.
+   Optional `permissions.management_mode: true` unlocks full API management
+   (create/modify/delete VM/LXC/network/storage) while keeping per-operation
+   confirmation — DELETE still requires typing `DELETE`, and path-level
+   destructive keywords are always blocked.
 5. **Framework guardrails as system prompt** — Constrains LLM thinking, not command execution.
 6. **httpx only** — Single HTTP library (removed requests dependency).
 7. **CIS L1 alignment** — verify_ssl=True, secrets module for tokens, restricted DB dir (0o700), least-privilege deny_always.

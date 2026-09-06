@@ -177,6 +177,83 @@ class TestProxmoxToolsRunCommand:
         result = tools.run_command("/nodes/pve1/qemu/100/status/start", method="post", body={})
         assert result == {"upid": "UPID:pve1:00000123"}
 
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_management_mode_allows_blocked_endpoint(self, mock_api):
+        """Management mode permits a critical endpoint with explicit opt-in."""
+        mock_instance = MagicMock()
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        traversed = getattr(mock_instance.nodes.pve1.lxc, "100").status.stop
+        traversed.post.return_value = {"upid": "UPID:pve1:00000555"}
+
+        result = tools.run_command(
+            "/nodes/pve1/lxc/100/status/stop",
+            method="post",
+            body={},
+            allow_destructive=True,
+        )
+        assert result == {"upid": "UPID:pve1:00000555"}
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_management_mode_allows_delete(self, mock_api):
+        """Management mode permits DELETE through the API traversal."""
+        mock_instance = MagicMock()
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        traversed = getattr(mock_instance.nodes.pve1.qemu, "100")
+        traversed.delete.return_value = {"data": None}
+
+        result = tools.run_command("/nodes/pve1/qemu/100", method="delete", allow_destructive=True)
+        assert result == {"data": None}
+        traversed.delete.assert_called_once_with()
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_management_mode_still_blocks_destructive_keywords(self, mock_api):
+        """Path-level destructive keywords are blocked even in management mode."""
+        mock_api.return_value = MagicMock()
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        with pytest.raises(PermissionError, match="Destructive operation blocked"):
+            tools.run_command(
+                "/nodes/pve1/qemu/100/destroy",
+                method="post",
+                body={},
+                allow_destructive=True,
+            )
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_management_mode_still_requires_body_for_post(self, mock_api):
+        """POST without a body still raises even in management mode."""
+        mock_api.return_value = MagicMock()
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        with pytest.raises(PermissionError, match="requires permission gate"):
+            tools.run_command(
+                "/nodes/pve1/lxc/100/status/stop",
+                method="post",
+                allow_destructive=True,
+            )
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_read_allowlist_includes_cluster_resources(self, mock_api):
+        """GET on /cluster/resources is allowed (management planning reads)."""
+        mock_instance = MagicMock()
+        mock_instance.cluster.resources.get.return_value = [
+            {"id": "node/pve1", "type": "node", "status": "online"}
+        ]
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        result = tools.run_command("/cluster/resources", method="get")
+        assert result[0]["status"] == "online"
+
 
 class TestProxmoxToolsGetHostPackages:
     @patch("src.proxmox_tools.ProxmoxAPI")

@@ -19,6 +19,7 @@ infrastructure guidance — with human-in-the-loop permission gating.
 | **System Health Monitoring** | Real-time CPU, RAM, storage, disk S.M.A.R.T., service status, and historical RRD metrics via Proxmox API |
 | **Conversation Memory** | Chat history logged with topic extraction. System context (repos, health, services) cached and injected into every conversation |
 | **Permission Gating** | Read operations auto-approved. Write operations require explicit confirmation. Destructive operations require a random token |
+| **Management Mode** | Opt-in (`permissions.management_mode: true`) full API management — create/modify/delete VMs, LXCs, network, and storage with explicit per-operation confirmation |
 | **Security Guardrails** | LLM responses constrained to NIST CSF AI Profile, CIS Ubuntu Level 1, CIS AI Controls Matrix, or general security-first |
 | **Data Validation ("Soul")** | LLM cannot make claims it cannot verify. Prevents false positives and hallucinated commands. Cites data sources for every finding |
 | **Database Management** | Tiered size warnings (50/75/100MB), VACUUM support, safe pruning with archive tables, conversation history with topic-based retrieval |
@@ -91,6 +92,32 @@ Key file locations on the LXC:
 Free-text input is sent directly to the LLM for advisory chat. System context
 (repos, health, services) is cached during `/digest` or `/refresh` and injected
 into every chat message with timestamp attribution.
+
+## Management Mode
+
+By default the agent is read-heavy: it can query the API freely, perform basic
+confirmed writes (start/stop VMs and LXCs, create VMs/LXCs/network/storage), but
+critical endpoints (`stop`/`reboot`/`resize`/`migrate`/`move`/`firewall`/`acl`/
+`user`/`group`/`permissions`) and **all DELETE operations are hard-blocked**.
+
+Set `permissions.management_mode: true` in `config.yaml` to unlock full API
+management. In management mode:
+
+| Operation | Confirmation required |
+|-----------|-----------------------|
+| GET (read) | auto-approved |
+| POST/PUT (create/modify) | type `y` |
+| DELETE (remove VM/LXC/network/storage) | type `DELETE` |
+
+Path-level destructive keywords (`destroy`/`delete`/`remove`/`unlink`/`purge`)
+are **always** blocked, even in management mode. Every mutating operation is
+logged to the audit trail (`tool_audit`) regardless of mode.
+
+The LLM can request single calls or batches of up to 5 operations:
+
+```
+[TOOL:proxmox_api] POST /nodes/pve/qemu {"vmid": 200, "name": "web-02", "cores": 2, "memory": 4096}
+```
 
 ## Setup Helper
 

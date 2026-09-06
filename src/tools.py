@@ -27,7 +27,10 @@ USER_BLACKLIST_PATH = Path.home() / ".config" / "pve-sentinel" / "blacklist.yaml
 TOOL_REGISTRY: dict[str, dict[str, str]] = {
     "proxmox_api": {
         "purpose": "Query Proxmox VE API (GET/POST/PUT/DELETE with confirmation)",
-        "access": "GET auto-approved; write requires confirmation; DELETE requires typed confirm",
+        "access": (
+            "GET auto-approved; writes require confirmation; DELETE requires typed "
+            "confirmation and management_mode: true"
+        ),
         "format": "[TOOL:proxmox_api] GET|POST|PUT|DELETE /nodes/{node}/path {body}",
     },
 }
@@ -122,7 +125,7 @@ def describe_api_operation(method: str, path: str, body: dict | None = None) -> 
     elif method == "PUT" and "/qemu" in path and "/config" in path:
         return f"Modify VM {path.split('/')[-2]} config"
     elif method == "DELETE" and "/qemu" in path:
-        return f"Delete VM {path.split('/')[-2]} — ⚠️ DESTRUCTIVE"
+        return f"Delete VM {path.split('/')[-1]} — ⚠️ DESTRUCTIVE"
 
     # LXC operations
     elif method == "POST" and "/lxc" in path:
@@ -131,7 +134,7 @@ def describe_api_operation(method: str, path: str, body: dict | None = None) -> 
             f" — {body.get('cores', '?')}C/{body.get('memory', '?')}MB"
         )
     elif method == "DELETE" and "/lxc" in path:
-        return f"Delete LXC {path.split('/')[-2]} — ⚠️ DESTRUCTIVE"
+        return f"Delete LXC {path.split('/')[-1]} — ⚠️ DESTRUCTIVE"
 
     # Network operations
     elif method == "POST" and "/network" in path:
@@ -155,8 +158,13 @@ def describe_api_operation(method: str, path: str, body: dict | None = None) -> 
 # ── Batch validation ───────────────────────────────────────────────
 
 
-def validate_batch(operations: list) -> tuple[bool, str]:
-    """Validate a batch of operations. Returns (valid, error_message)."""
+def validate_batch(operations: list, management_mode: bool = False) -> tuple[bool, str]:
+    """Validate a batch of operations. Returns (valid, error_message).
+
+    In management mode the built-in critical-path blacklist is bypassed so the
+    user can perform stop/reboot/resize/firewall/ACL operations with explicit
+    confirmation. User-added blacklist entries are always enforced.
+    """
     if not isinstance(operations, list):
         return False, "Batch must be a JSON array"
     if len(operations) > BATCH_OPERATIONS_MAX:
@@ -168,7 +176,10 @@ def validate_batch(operations: list) -> tuple[bool, str]:
         method = op.get("method", "").upper()
         path = op.get("path", "")
 
-        if is_path_blacklisted(path):
+        blocked = (not management_mode and is_path_blacklisted(path)) or (
+            management_mode and any(u in path for u in _load_user_blacklist())
+        )
+        if blocked:
             return False, f"Operation {i + 1} blocked: {path} is on the critical path blacklist"
 
         if method not in ("GET", "POST", "PUT", "DELETE"):
@@ -181,7 +192,11 @@ def validate_batch(operations: list) -> tuple[bool, str]:
 
 
 def execute_proxmox_api(
-    method: str, path: str, proxmox: Any, body: dict | None = None
+    method: str,
+    path: str,
+    proxmox: Any,
+    body: dict | None = None,
+    allow_destructive: bool = False,
 ) -> dict[str, Any]:
     """Execute a Proxmox API call via proxmoxer.
 
@@ -190,6 +205,7 @@ def execute_proxmox_api(
         path: API path (e.g., /nodes/kevbot-pve/apt/repositories).
         proxmox: ProxmoxTools instance.
         body: Request body for POST/PUT operations.
+        allow_destructive: Enable DELETE and critical endpoints (management mode).
 
     Returns:
         dict with 'success', 'data', 'error' keys.
@@ -201,19 +217,27 @@ def execute_proxmox_api(
         }
 
     try:
-        result = proxmox.run_command(path, method=method.lower(), body=body)
+        result = proxmox.run_command(
+            path, method=method.lower(), body=body, allow_destructive=allow_destructive
+        )
         return {"success": True, "data": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-def execute_tool(tool_name: str, tool_args: str, proxmox: Any) -> dict[str, Any]:
+def execute_tool(
+    tool_name: str,
+    tool_args: str,
+    proxmox: Any,
+    allow_destructive: bool = False,
+) -> dict[str, Any]:
     """Route tool execution to the appropriate handler.
 
     Args:
         tool_name: Name of the tool (e.g., "proxmox_api").
         tool_args: Arguments for the tool (e.g., "GET /nodes/test/status").
         proxmox: ProxmoxTools instance.
+        allow_destructive: Enable DELETE and critical endpoints (management mode).
 
     Returns:
         dict with 'success', 'data', 'error' keys.
@@ -227,18 +251,27 @@ def execute_tool(tool_name: str, tool_args: str, proxmox: Any) -> dict[str, Any]
             }
         method, rest = parts
 
-        # Check for JSON body
-        body = None
-        try:
-            body = json.loads(rest)
-            # If it's a dict with method/path, extract them
-            if isinstance(body, dict) and "method" in body and "path" in body:
-                method = body["method"]
-                rest = body["path"]
-                body = body.get("body")
-        except json.JSONDecodeError:
-            pass
+        body: dict | None = None
+        path = rest.strip()
 
-        return execute_proxmox_api(method, rest, proxmox, body)
+        # Support a JSON object body in three forms:
+        #   1. "POST /path {"vmid": 100}"  — path plus inline JSON body
+        #   2. "POST {"method": ..., "path": ..., "body": ...}" — full object
+        try:
+            obj = json.loads(rest)
+            if isinstance(obj, dict) and "method" in obj and "path" in obj:
+                method = str(obj["method"]).upper()
+                path = str(obj["path"]).strip()
+                body = obj.get("body")
+        except json.JSONDecodeError:
+            idx = rest.find("{")
+            if idx != -1:
+                path = rest[:idx].strip()
+                try:
+                    body = json.loads(rest[idx:])
+                except json.JSONDecodeError:
+                    body = None
+
+        return execute_proxmox_api(method, path, proxmox, body, allow_destructive=allow_destructive)
 
     return {"success": False, "error": f"Unknown tool: {tool_name}"}

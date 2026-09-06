@@ -61,7 +61,7 @@
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
 | Enforce least privilege | ✅ | `src/permission_gate.py` — READ/WRITE/DESTRUCTIVE levels |
-| Deny by default for destructive operations | ✅ | `src/permission_gate.py:49` — `DENY_ALWAYS` |
+| Deny by default for destructive operations | ✅ | `src/permission_gate.py:49` — `DENY_ALWAYS`; hard-blocked endpoints and DELETE require opt-in `management_mode` |
 | Use cryptographic random for tokens | ✅ | `src/permission_gate.py:7` — `secrets` module |
 | Defense in depth for API operations | ✅ | `src/proxmox_tools.py:355-387` — multiple validation layers |
 

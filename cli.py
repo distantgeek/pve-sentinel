@@ -87,6 +87,7 @@ def _ssl_error_panel(error: Exception) -> Panel:
 
 # ── CLI Shell ──────────────────────────────────────────────────────
 
+
 class SentinelShell:
     """Interactive REPL for pve-sentinel."""
 
@@ -97,6 +98,9 @@ class SentinelShell:
         self.client = self._init_client()
         self.proxmox = self._init_proxmox()
         self.gate = self._init_gate()
+        self.management_mode = bool(
+            self.config.get("permissions", {}).get("management_mode", False)
+        )
 
         # History directory
         history_path = Path(HISTORY_FILE)
@@ -107,9 +111,11 @@ class SentinelShell:
         self.session: PromptSession = PromptSession(
             completer=self.completer,
             history=FileHistory(HISTORY_FILE),
-            style=Style.from_dict({
-                "prompt": "ansicyan bold",
-            }),
+            style=Style.from_dict(
+                {
+                    "prompt": "ansicyan bold",
+                }
+            ),
         )
 
     def _load_config(self) -> dict:
@@ -117,12 +123,13 @@ class SentinelShell:
         try:
             return load_config()
         except (FileNotFoundError, ValueError) as e:
-            self.console.print(Panel(
-                f"[yellow]Config warning:[/yellow] {e}\n"
-                "Some features may be unavailable.",
-                title="Configuration",
-                border_style="yellow",
-            ))
+            self.console.print(
+                Panel(
+                    f"[yellow]Config warning:[/yellow] {e}\nSome features may be unavailable.",
+                    title="Configuration",
+                    border_style="yellow",
+                )
+            )
             return {
                 "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
                 "proxmox": {},
@@ -140,12 +147,14 @@ class SentinelShell:
                 guardrail_custom=guard.get("custom"),
             )
         except ValueError as e:
-            self.console.print(Panel(
-                f"[yellow]LLM unavailable:[/yellow] {e}\n"
-                "Set OPENCODE_GO_API_KEY to enable advisory features.",
-                title="OpenCode Go",
-                border_style="yellow",
-            ))
+            self.console.print(
+                Panel(
+                    f"[yellow]LLM unavailable:[/yellow] {e}\n"
+                    "Set OPENCODE_GO_API_KEY to enable advisory features.",
+                    title="OpenCode Go",
+                    border_style="yellow",
+                )
+            )
             return None
 
     def _init_proxmox(self) -> ProxmoxTools | None:
@@ -167,11 +176,13 @@ class SentinelShell:
             if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
                 self.console.print(_ssl_error_panel(e))
             else:
-                self.console.print(Panel(
-                    f"[yellow]Proxmox unavailable:[/yellow] {e}",
-                    title="Proxmox API",
-                    border_style="yellow",
-                ))
+                self.console.print(
+                    Panel(
+                        f"[yellow]Proxmox unavailable:[/yellow] {e}",
+                        title="Proxmox API",
+                        border_style="yellow",
+                    )
+                )
             return None
 
     def _init_gate(self) -> PermissionGate:
@@ -217,6 +228,13 @@ class SentinelShell:
         guard = self.config.get("guardrails", {})
         preset = guard.get("preset", "general") if guard.get("enabled") else "disabled"
         table.add_row("Guardrails", preset)
+
+        table.add_row(
+            "Management mode",
+            "[bold yellow]ENABLED — writes/delete require confirmation[/bold yellow]"
+            if self.management_mode
+            else "disabled (read + basic writes only)",
+        )
 
         self.console.print(table)
         self.console.print()
@@ -288,7 +306,9 @@ class SentinelShell:
                     break
 
                 # Check for batch tool request first
-                batch_match = re.match(r'\[TOOL:(\w+)\]\s+BATCH\s+(.*)', response.strip(), re.DOTALL)
+                batch_match = re.match(
+                    r"\[TOOL:(\w+)\]\s+BATCH\s+(.*)", response.strip(), re.DOTALL
+                )
                 if batch_match:
                     tool_name = batch_match.group(1)
                     try:
@@ -303,31 +323,34 @@ class SentinelShell:
                         describe_api_operation,
                         validate_batch,
                     )
-                    valid, error = validate_batch(operations)
+
+                    valid, error = validate_batch(operations, management_mode=self.management_mode)
                     if not valid:
                         self.console.print(f"[red]Batch validation failed: {error}[/red]")
                         break
 
                     # Display operations
                     steps_text = "\n".join(
-                        f"  Step {j+1}/{len(operations)}: {describe_api_operation(op.get('method', 'GET'), op.get('path', ''), op.get('body'))}"
+                        f"  Step {j + 1}/{len(operations)}: {describe_api_operation(op.get('method', 'GET'), op.get('path', ''), op.get('body'))}"
                         for j, op in enumerate(operations)
                     )
-                    self.console.print(Panel(
-                        steps_text,
-                        title=f"⚠️ Batch operation requested — {len(operations)} steps",
-                        border_style="yellow",
-                    ))
+                    self.console.print(
+                        Panel(
+                            steps_text,
+                            title=f"⚠️ Batch operation requested — {len(operations)} steps",
+                            border_style="yellow",
+                        )
+                    )
 
                     # Check for destructive operations
                     has_destructive = any(
-                        op.get("method", "").upper() in DESTRUCTIVE_METHODS
-                        for op in operations
+                        op.get("method", "").upper() in DESTRUCTIVE_METHODS for op in operations
                     )
 
                     if has_destructive:
                         destructive_count = sum(
-                            1 for op in operations
+                            1
+                            for op in operations
                             if op.get("method", "").upper() in DESTRUCTIVE_METHODS
                         )
                         try:
@@ -343,9 +366,11 @@ class SentinelShell:
                             break
                     else:
                         try:
-                            confirm = self.session.prompt(
-                                "[yellow]Confirm all? (y/n): [/yellow]"
-                            ).strip().lower()
+                            confirm = (
+                                self.session.prompt("[yellow]Confirm all? (y/n): [/yellow]")
+                                .strip()
+                                .lower()
+                            )
                         except (KeyboardInterrupt, EOFError):
                             confirm = "n"
                         if confirm != "y":
@@ -368,24 +393,27 @@ class SentinelShell:
 
                         while True:
                             self.console.print(
-                                f"[dim]Executing Step {j+1}/{len(operations)}...[/dim]"
+                                f"[dim]Executing Step {j + 1}/{len(operations)}...[/dim]"
                             )
 
                             try:
                                 result = self.proxmox.run_command(
-                                    path, method=method.lower(), body=body
+                                    path,
+                                    method=method.lower(),
+                                    body=body,
+                                    allow_destructive=self.management_mode,
                                 )
                                 results.append({"success": True, "data": result})
                                 desc = describe_api_operation(method, path, body)
                                 short_desc = desc.split("—")[0].strip() if "—" in desc else desc
                                 self.console.print(
-                                    f"[green]✅ Step {j+1}/{len(operations)}: {short_desc}[/green]"
+                                    f"[green]✅ Step {j + 1}/{len(operations)}: {short_desc}[/green]"
                                 )
                                 break
                             except Exception as e:
                                 results.append({"success": False, "error": str(e)})
                                 self.console.print(
-                                    f"[red]❌ Step {j+1}/{len(operations)} failed: {e}[/red]"
+                                    f"[red]❌ Step {j + 1}/{len(operations)} failed: {e}[/red]"
                                 )
 
                                 # Prompt user for recovery
@@ -410,7 +438,7 @@ class SentinelShell:
                                     retries += 1
                                     # Loop continues to retry
                                 elif choice == "2":
-                                    self.console.print(f"[dim]Step {j+1} skipped.[/dim]")
+                                    self.console.print(f"[dim]Step {j + 1} skipped.[/dim]")
                                     break  # Continue to next operation
                                 elif choice == "3":
                                     # Mark remaining as aborted
@@ -424,7 +452,7 @@ class SentinelShell:
                                     # Pass partial results to LLM for suggestions
                                     partial_results = results[: j + 1]
                                     suggestion_prompt = (
-                                        f"Step {j+1} failed: {e}\n"
+                                        f"Step {j + 1} failed: {e}\n"
                                         f"Partial results: {json.dumps(partial_results)}\n"
                                         f"Suggest how to fix this. Do NOT execute — just provide guidance."
                                     )
@@ -434,9 +462,7 @@ class SentinelShell:
                                         self.console.print(Markdown(suggestion))
                                     # User decides next action — loop back to prompt
                                 else:
-                                    self.console.print(
-                                        "[yellow]Invalid choice. Aborting.[/yellow]"
-                                    )
+                                    self.console.print("[yellow]Invalid choice. Aborting.[/yellow]")
                                     for _k in range(j + 1, len(operations)):
                                         results.append(
                                             {"success": False, "error": "aborted by user"}
@@ -451,13 +477,15 @@ class SentinelShell:
                     for j, (op, result) in enumerate(zip(operations, results, strict=True)):
                         self.db.log_conversation(
                             "tool_audit",
-                            json.dumps({
-                                "batch_index": j + 1,
-                                "method": op.get("method"),
-                                "path": op.get("path"),
-                                "confirmed": True,
-                                "result": "success" if result.get("success") else "error",
-                            }),
+                            json.dumps(
+                                {
+                                    "batch_index": j + 1,
+                                    "method": op.get("method"),
+                                    "path": op.get("path"),
+                                    "confirmed": True,
+                                    "result": "success" if result.get("success") else "error",
+                                }
+                            ),
                             topic="audit",
                         )
 
@@ -469,7 +497,7 @@ class SentinelShell:
                     continue
 
                 # Check for single tool request
-                tool_match = re.match(r'\[TOOL:(\w+)\]\s+(.*)', response.strip())
+                tool_match = re.match(r"\[TOOL:(\w+)\]\s+(.*)", response.strip())
                 if not tool_match:
                     final_response = response
                     break  # No tool request, display response
@@ -485,7 +513,9 @@ class SentinelShell:
                     break
 
                 # Execute tool
-                result = execute_tool(tool_name, tool_args, self.proxmox)
+                result = execute_tool(
+                    tool_name, tool_args, self.proxmox, allow_destructive=self.management_mode
+                )
 
                 if result.get("success"):
                     data_str = json.dumps(result["data"])
@@ -494,9 +524,7 @@ class SentinelShell:
                     entry_count = ""
                     if isinstance(result["data"], list):
                         entry_count = f" {len(result['data'])} entries,"
-                    self.console.print(
-                        f"[dim]✅ Retrieved{entry_count} {data_size} bytes[/dim]"
-                    )
+                    self.console.print(f"[dim]✅ Retrieved{entry_count} {data_size} bytes[/dim]")
                 else:
                     self.console.print(f"[dim]❌ Error: {result['error']}[/dim]")
                     # Ask user if they want to retry
@@ -521,7 +549,7 @@ class SentinelShell:
                 self.console.print(Markdown(final_response))
                 self.db.log_conversation("user", prompt)
                 self.db.log_conversation("assistant", final_response)
-            elif response and not re.match(r'\[TOOL:', response.strip()):
+            elif response and not re.match(r"\[TOOL:", response.strip()):
                 # Last response was a tool request but loop ended — show it
                 self.console.print(Markdown(response))
                 self.db.log_conversation("user", prompt)
@@ -535,32 +563,59 @@ class SentinelShell:
         """Check if tool request is allowed via PermissionGate.
 
         Read operations (GET) are auto-approved. Write/destructive operations
-        require user confirmation. Blocked paths are rejected.
+        require user confirmation. In management mode the built-in critical-path
+        blacklist is relaxed (but every write still requires explicit confirmation,
+        and DELETE still requires typed confirmation).
         """
         from src.tools import DESTRUCTIVE_METHODS, describe_api_operation, is_path_blacklisted
 
         if tool_name == "proxmox_api":
             parts = tool_args.split(None, 1)
             method = parts[0].upper() if parts else ""
-            path = parts[1] if len(parts) > 1 else ""
+            rest = parts[1] if len(parts) > 1 else ""
+
+            # Extract a human-readable path and any inline JSON body so the
+            # confirmation panel can show exactly what will be created/modified.
+            path = rest.strip()
+            body = None
+            try:
+                obj = json.loads(rest)
+                if isinstance(obj, dict) and "method" in obj and "path" in obj:
+                    path = str(obj["path"]).strip()
+                    body = obj.get("body")
+            except json.JSONDecodeError:
+                idx = rest.find("{")
+                if idx != -1:
+                    path = rest[:idx].strip()
+                    try:
+                        body = json.loads(rest[idx:])
+                    except json.JSONDecodeError:
+                        body = None
 
             if method == "GET":
                 return True  # Read operations auto-approved
 
-            # Check blacklist
-            if is_path_blacklisted(path):
+            # In management mode the built-in blacklist is bypassed so critical
+            # endpoints are confirmable instead of hard-blocked. User-added
+            # blacklist entries always remain enforced.
+            if not self.management_mode and is_path_blacklisted(path):
                 self.console.print(
                     f"[yellow]Path blocked: {path} is on the critical path blacklist.[/yellow]"
+                )
+                self.console.print(
+                    "[dim]Enable 'management_mode: true' in config.yaml to make this "
+                    "operation confirmable.[/dim]"
                 )
                 return False
 
             # Show operation description and prompt for confirmation
-            desc = describe_api_operation(method, path)
-            self.console.print(Panel(
-                desc,
-                title="⚠️ Write operation requested",
-                border_style="yellow",
-            ))
+            desc = describe_api_operation(method, path, body)
+            title = "⚠️ Write operation requested"
+            border = "yellow"
+            if self.management_mode and method in DESTRUCTIVE_METHODS:
+                title = "⚠️ DESTRUCTIVE operation requested (management mode)"
+                border = "red"
+            self.console.print(Panel(desc, title=title, border_style=border))
 
             if method in DESTRUCTIVE_METHODS:
                 try:
@@ -574,9 +629,9 @@ class SentinelShell:
                     return False
             else:
                 try:
-                    confirm = self.session.prompt(
-                        "[yellow]Confirm? (y/n): [/yellow]"
-                    ).strip().lower()
+                    confirm = (
+                        self.session.prompt("[yellow]Confirm? (y/n): [/yellow]").strip().lower()
+                    )
                 except (KeyboardInterrupt, EOFError):
                     confirm = "n"
                 if confirm != "y":
@@ -613,7 +668,9 @@ class SentinelShell:
             return ""
 
         parts = []
-        parts.append("Available system context — reference data only. Do NOT re-list findings unless asked.")
+        parts.append(
+            "Available system context — reference data only. Do NOT re-list findings unless asked."
+        )
 
         if "repos" in snapshots:
             r = snapshots["repos"]["data"]
@@ -642,10 +699,7 @@ class SentinelShell:
             svc_list = s.get("services", [])
             running = sum(1 for sv in svc_list if sv.get("state") == "running")
             dead = [sv["name"] for sv in svc_list if sv.get("state") == "dead"]
-            parts.append(
-                f"  Services (cached {ts}): {running} running, "
-                f"dead={dead}"
-            )
+            parts.append(f"  Services (cached {ts}): {running} running, dead={dead}")
 
         # Append available tools info
         parts.append("")
@@ -704,14 +758,16 @@ class SentinelShell:
 
             # Node info
             node_status = status.get("status", {})
-            self.console.print(Panel(
-                f"Node: [bold]{status['node']}[/bold]\n"
-                f"CPU: {node_status.get('cpu', 0) * 100:.1f}%\n"
-                f"Memory: {node_status.get('memory', {}).get('used', 0) / 1024**3:.1f}G / "
-                f"{node_status.get('memory', {}).get('total', 0) / 1024**3:.1f}G",
-                title="Proxmox Status",
-                border_style="cyan",
-            ))
+            self.console.print(
+                Panel(
+                    f"Node: [bold]{status['node']}[/bold]\n"
+                    f"CPU: {node_status.get('cpu', 0) * 100:.1f}%\n"
+                    f"Memory: {node_status.get('memory', {}).get('used', 0) / 1024**3:.1f}G / "
+                    f"{node_status.get('memory', {}).get('total', 0) / 1024**3:.1f}G",
+                    title="Proxmox Status",
+                    border_style="cyan",
+                )
+            )
 
             # VMs table
             if status.get("vms"):
@@ -726,7 +782,8 @@ class SentinelShell:
                     status_style = "green" if vm["status"] == "running" else "yellow"
                     mem_gb = vm.get("maxmem", 0) / 1024**3
                     vm_table.add_row(
-                        str(vm["vmid"]), vm["name"],
+                        str(vm["vmid"]),
+                        vm["name"],
                         Text(vm["status"], style=status_style),
                         str(vm.get("cpus", "")),
                         f"{mem_gb:.1f}G" if mem_gb else "",
@@ -746,7 +803,8 @@ class SentinelShell:
                     status_style = "green" if lxc["status"] == "running" else "yellow"
                     mem_gb = lxc.get("maxmem", 0) / 1024**3
                     lxc_table.add_row(
-                        str(lxc["vmid"]), lxc["name"],
+                        str(lxc["vmid"]),
+                        lxc["name"],
                         Text(lxc["status"], style=status_style),
                         str(lxc.get("cpus", "")),
                         f"{mem_gb:.1f}G" if mem_gb else "",
@@ -794,7 +852,9 @@ class SentinelShell:
     def _cmd_digest(self, parts: list[str]) -> None:
         """Run full CVE scan and display LLM summary, using cached results when fresh."""
         if not self.client:
-            self.console.print("[yellow]LLM unavailable — scan results stored but not summarized.[/yellow]")
+            self.console.print(
+                "[yellow]LLM unavailable — scan results stored but not summarized.[/yellow]"
+            )
 
         force = len(parts) >= 2 and parts[1].lower() in ("force", "--force")
         ttl_hours = self.config.get("storage", {}).get("scan_cache_ttl_hours", 24)
@@ -803,6 +863,7 @@ class SentinelShell:
         cached = self.db.get_snapshot("scan_results")
         if not force and cached:
             from datetime import datetime
+
             try:
                 cached_ts = datetime.fromisoformat(cached["updated_at"].replace("Z", "+00:00"))
                 if cached_ts.tzinfo is None:
@@ -821,21 +882,25 @@ class SentinelShell:
         age_min = age_hours * 60
         age_str = f"{age_hours:.1f} hours" if age_hours >= 1 else f"{age_min:.0f} minutes"
 
-        self.console.print(f"[dim]Using cached scan from {cached['updated_at']} ({age_str} old)[/dim]")
+        self.console.print(
+            f"[dim]Using cached scan from {cached['updated_at']} ({age_str} old)[/dim]"
+        )
 
         data = cached["data"]
         host = data.get("host_result", {})
         lxc = data.get("lxc_result", {})
         repo_summary = data.get("repo_summary", "")
 
-        self.console.print(Panel(
-            f"Host scan: {host.get('cves_found', 0)} CVEs, {host.get('packages_checked', 0)} packages\n"
-            f"LXC scan:  {lxc.get('cves_matched', 0)} matches, {lxc.get('packages_checked', 0)} packages\n"
-            f"{repo_summary}\n"
-            f"Duration:  {host.get('duration', 0) + lxc.get('duration', 0):.1f}s",
-            title="Cached Scan Results",
-            border_style="dim",
-        ))
+        self.console.print(
+            Panel(
+                f"Host scan: {host.get('cves_found', 0)} CVEs, {host.get('packages_checked', 0)} packages\n"
+                f"LXC scan:  {lxc.get('cves_matched', 0)} matches, {lxc.get('packages_checked', 0)} packages\n"
+                f"{repo_summary}\n"
+                f"Duration:  {host.get('duration', 0) + lxc.get('duration', 0):.1f}s",
+                title="Cached Scan Results",
+                border_style="dim",
+            )
+        )
 
         # Show matched CVEs if any
         matched = lxc.get("matched_cves", [])
@@ -849,10 +914,15 @@ class SentinelShell:
 
             for m in matched[:20]:
                 sev = m.get("severity", "UNKNOWN")
-                color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(sev, "white")
+                color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(
+                    sev, "white"
+                )
                 table.add_row(
-                    m["cve_id"], m["package"], m["version"],
-                    Text(sev, style=color), str(m.get("cvss_score", "")),
+                    m["cve_id"],
+                    m["package"],
+                    m["version"],
+                    Text(sev, style=color),
+                    str(m.get("cvss_score", "")),
                 )
             self.console.print(table)
             if len(matched) > 20:
@@ -861,11 +931,14 @@ class SentinelShell:
         # Display cached LLM summary
         llm_summary = data.get("llm_summary", "")
         if llm_summary:
-            self.console.print(Panel(
-                llm_summary + "\n\n[dim]Cached summary — ask a follow-up question for fresh analysis.[/dim]",
-                title="Cached LLM Summary",
-                border_style="dim",
-            ))
+            self.console.print(
+                Panel(
+                    llm_summary
+                    + "\n\n[dim]Cached summary — ask a follow-up question for fresh analysis.[/dim]",
+                    title="Cached LLM Summary",
+                    border_style="dim",
+                )
+            )
 
     def _run_fresh_digest(self) -> None:
         """Run a full CVE scan, cache results, and display LLM summary."""
@@ -910,9 +983,7 @@ class SentinelShell:
                         f"Warnings: {repos['warnings']}\n"
                         f"Errors: {repos['errors']}"
                     )
-                    repo_summary = (
-                        f"Repos: {', '.join(enabled) if enabled else 'none enabled'}"
-                    )
+                    repo_summary = f"Repos: {', '.join(enabled) if enabled else 'none enabled'}"
                 except Exception:
                     repo_context = "APT Repositories: unable to query (pending verification)"
 
@@ -952,14 +1023,16 @@ class SentinelShell:
             lxc_result = scanner.scan_local_packages(packages=[])
             scanner.close()
 
-            self.console.print(Panel(
-                f"Host scan: {result['cves_found']} CVEs, {result['packages_checked']} packages\n"
-                f"LXC scan:  {lxc_result['cves_matched']} matches, {lxc_result['packages_checked']} packages\n"
-                f"{repo_summary}\n"
-                f"Duration:  {result['duration'] + lxc_result['duration']:.1f}s",
-                title="Scan Results",
-                border_style="green",
-            ))
+            self.console.print(
+                Panel(
+                    f"Host scan: {result['cves_found']} CVEs, {result['packages_checked']} packages\n"
+                    f"LXC scan:  {lxc_result['cves_matched']} matches, {lxc_result['packages_checked']} packages\n"
+                    f"{repo_summary}\n"
+                    f"Duration:  {result['duration'] + lxc_result['duration']:.1f}s",
+                    title="Scan Results",
+                    border_style="green",
+                )
+            )
 
             # Show matched CVEs if any
             if lxc_result.get("matched_cves"):
@@ -972,14 +1045,24 @@ class SentinelShell:
 
                 for m in lxc_result["matched_cves"][:20]:
                     sev = m.get("severity", "UNKNOWN")
-                    color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(sev, "white")
+                    color = {
+                        "CRITICAL": "red",
+                        "HIGH": "red",
+                        "MEDIUM": "yellow",
+                        "LOW": "green",
+                    }.get(sev, "white")
                     table.add_row(
-                        m["cve_id"], m["package"], m["version"],
-                        Text(sev, style=color), str(m.get("cvss_score", "")),
+                        m["cve_id"],
+                        m["package"],
+                        m["version"],
+                        Text(sev, style=color),
+                        str(m.get("cvss_score", "")),
                     )
                 self.console.print(table)
                 if len(lxc_result["matched_cves"]) > 20:
-                    self.console.print(f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]")
+                    self.console.print(
+                        f"[dim]... and {len(lxc_result['matched_cves']) - 20} more[/dim]"
+                    )
 
             # LLM summary
             llm_summary = ""
@@ -1036,7 +1119,9 @@ class SentinelShell:
         self.console.print(table)
         self.console.print()
         self.console.print("[dim]Tools are requested by the LLM during conversation.[/dim]")
-        self.console.print("[dim]Write operations require /proxmox <action> with manual confirmation.[/dim]")
+        self.console.print(
+            "[dim]Write operations require /proxmox <action> with manual confirmation.[/dim]"
+        )
 
     def _cmd_blacklist(self, parts: list[str]) -> None:
         """Manage API path blacklist (list/add/remove)."""
@@ -1066,7 +1151,9 @@ class SentinelShell:
                 table.add_row(str(i), path, Text(source, style=source_style))
 
             self.console.print(table)
-            self.console.print(f"[dim]Total: {len(full_list)} paths ({len(BUILTIN_BLACKLIST)} built-in, {len(full_list) - len(BUILTIN_BLACKLIST)} user-added)[/dim]")
+            self.console.print(
+                f"[dim]Total: {len(full_list)} paths ({len(BUILTIN_BLACKLIST)} built-in, {len(full_list) - len(BUILTIN_BLACKLIST)} user-added)[/dim]"
+            )
 
         elif subcmd == "add" and len(parts) >= 3:
             path = parts[2]
@@ -1156,7 +1243,9 @@ class SentinelShell:
 
             for cve in cves:
                 sev = cve.get("severity", "UNKNOWN")
-                color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(sev, "white")
+                color = {"CRITICAL": "red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(
+                    sev, "white"
+                )
                 table.add_row(
                     cve["id"],
                     Text(sev, style=color),
@@ -1268,11 +1357,13 @@ class SentinelShell:
                 entry_count = ""
                 if isinstance(result, list):
                     entry_count = f" — {len(result)} entries"
-                self.console.print(Panel(
-                    data_str,
-                    title=f"API Result: {'/'.join(parts[1:])}{entry_count} ({data_size} bytes)",
-                    border_style="cyan",
-                ))
+                self.console.print(
+                    Panel(
+                        data_str,
+                        title=f"API Result: {'/'.join(parts[1:])}{entry_count} ({data_size} bytes)",
+                        border_style="cyan",
+                    )
+                )
                 self.console.print(
                     "[dim]💡 Tip: Ask a follow-up question to analyze this data with the LLM.[/dim]"
                 )
@@ -1349,7 +1440,9 @@ class SentinelShell:
         # Build panel content
         lines = []
         lines.append(f"Node: [bold]{health['node']}[/bold]  |  {health.get('pveversion', '')}")
-        lines.append(f"Kernel: {health.get('kernel', '')}  |  Uptime: {fmt_uptime(health.get('uptime', 0))}")
+        lines.append(
+            f"Kernel: {health.get('kernel', '')}  |  Uptime: {fmt_uptime(health.get('uptime', 0))}"
+        )
         lines.append("")
 
         # CPU
@@ -1440,11 +1533,13 @@ class SentinelShell:
             f"{rc['cves']:,} CVEs, {rc['matches']:,} matches"
         )
 
-        self.console.print(Panel(
-            "\n".join(lines),
-            title="Proxmox Health",
-            border_style="cyan",
-        ))
+        self.console.print(
+            Panel(
+                "\n".join(lines),
+                title="Proxmox Health",
+                border_style="cyan",
+            )
+        )
 
     def _health_rrd(self, args: list[str]) -> None:
         """Historical metrics from RRD."""
@@ -1509,8 +1604,11 @@ class SentinelShell:
 
         # Known expected-dead services (single-node, no HA)
         expected_dead = {
-            "corosync", "pve-ha-crm", "pve-ha-lrm",
-            "syslog", "systemd-timesyncd",
+            "corosync",
+            "pve-ha-crm",
+            "pve-ha-lrm",
+            "syslog",
+            "systemd-timesyncd",
         }
 
         for s in sorted(services, key=lambda x: x["name"]):
@@ -1580,24 +1678,28 @@ class SentinelShell:
         before = self.db.get_size_mb()
         with self.console.status("[cyan]Running VACUUM...[/cyan]"):
             after = self.db.vacuum()
-        self.console.print(Panel(
-            f"Before: {before:.2f} MB\nAfter:  {after:.2f} MB\nFreed:  {before - after:.2f} MB",
-            title="VACUUM Complete",
-            border_style="green",
-        ))
+        self.console.print(
+            Panel(
+                f"Before: {before:.2f} MB\nAfter:  {after:.2f} MB\nFreed:  {before - after:.2f} MB",
+                title="VACUUM Complete",
+                border_style="green",
+            )
+        )
 
     def _db_prune(self, days: int) -> None:
         """Archive and remove old unmatched CVEs."""
         with self.console.status(f"[cyan]Pruning unmatched CVEs older than {days} days...[/cyan]"):
             count = self.db.prune_old_cves(days)
         after = self.db.get_size_mb()
-        self.console.print(Panel(
-            f"Archived and removed: {count} CVEs\n"
-            f"Current DB size: {after:.2f} MB\n"
-            f"Note: Pruned CVEs are archived in cve_archive table for safety.",
-            title="Prune Complete",
-            border_style="green",
-        ))
+        self.console.print(
+            Panel(
+                f"Archived and removed: {count} CVEs\n"
+                f"Current DB size: {after:.2f} MB\n"
+                f"Note: Pruned CVEs are archived in cve_archive table for safety.",
+                title="Prune Complete",
+                border_style="green",
+            )
+        )
 
     def _db_history(self, n: int) -> None:
         """Show recent conversation history."""
@@ -1631,6 +1733,7 @@ class SentinelShell:
 
 
 # ── Entry Point ────────────────────────────────────────────────────
+
 
 def main() -> None:
     """Entry point for pve-sentinel CLI."""

@@ -8,7 +8,7 @@ import os
 from datetime import UTC, datetime
 
 # Static version from pyproject.toml — update on each release
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 # Build timestamp — set at deploy/sync time
 BUILD_TS_FILE = os.path.join(os.path.dirname(__file__), ".build_ts")
@@ -24,7 +24,7 @@ def _read_build_ts() -> str:
 
 
 def version_string() -> str:
-    """Return version with build timestamp, e.g. '0.5.0 (2026-05-05T14:32:00Z)'."""
+    """Return version with build timestamp, e.g. '0.6.0 (2026-05-05T14:32:00Z)'."""
     ts = _read_build_ts()
     return f"{VERSION} ({ts})"
 

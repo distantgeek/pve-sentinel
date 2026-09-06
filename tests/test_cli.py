@@ -62,25 +62,41 @@ class TestCliConstants:
     def test_banner_nonempty(self):
         """Banner must contain ASCII art."""
         from cli import BANNER
+
         assert "pve-sentinel" in BANNER or "___" in BANNER
 
     def test_commands_dict_nonempty(self):
         """COMMANDS must have entries."""
         from cli import COMMANDS
+
         assert len(COMMANDS) > 0
 
     def test_slash_commands_match_keys(self):
         """SLASH_COMMANDS must be derived from COMMANDS keys."""
         from cli import COMMANDS, SLASH_COMMANDS
+
         expected = [cmd.split()[0] for cmd in COMMANDS]
         assert sorted(SLASH_COMMANDS) == sorted(expected)
 
     def test_expected_commands_present(self):
         """All documented commands must be in COMMANDS."""
         from cli import COMMANDS
-        expected = ["/help", "/quit", "/status", "/history", "/digest",
-                     "/health", "/health rrd [period]", "/refresh [type]", "/db [subcmd]",
-                     "/guardrails [preset]", "/cve check <pkg>", "/cve scan", "/proxmox <action>"]
+
+        expected = [
+            "/help",
+            "/quit",
+            "/status",
+            "/history",
+            "/digest",
+            "/health",
+            "/health rrd [period]",
+            "/refresh [type]",
+            "/db [subcmd]",
+            "/guardrails [preset]",
+            "/cve check <pkg>",
+            "/cve scan",
+            "/proxmox <action>",
+        ]
         for cmd in expected:
             assert cmd in COMMANDS, f"Missing command: {cmd}"
 
@@ -94,6 +110,7 @@ class TestSslErrorPanel:
     def test_returns_panel(self):
         """_ssl_error_panel must return a Panel with correct title."""
         from cli import _ssl_error_panel
+
         error = Exception("CERTIFICATE_VERIFY_FAILED: self-signed")
         panel = _ssl_error_panel(error)
         assert "SSL Certificate Verification Failed" in panel.title
@@ -101,6 +118,7 @@ class TestSslErrorPanel:
     def test_contains_fix_options(self):
         """Panel must mention both fix options."""
         from cli import _ssl_error_panel
+
         error = Exception("SSL error")
         panel = _ssl_error_panel(error)
         renderable = str(panel.renderable)
@@ -130,15 +148,16 @@ class TestSentinelShellInit:
     @patch("cli.OpenCodeClient")
     @patch("cli.ProxmoxTools")
     @patch("cli.PermissionGate")
-    def test_init_with_minimal_config(self, mock_gate, mock_proxmox,
-                                       mock_client, mock_db, mock_load_cfg,
-                                       mock_config):
+    def test_init_with_minimal_config(
+        self, mock_gate, mock_proxmox, mock_client, mock_db, mock_load_cfg, mock_config
+    ):
         """Shell must initialize with minimal config (no Proxmox, no LLM)."""
         mock_load_cfg.return_value = mock_config
         mock_client.side_effect = ValueError("No API key")
         mock_proxmox.return_value = None
 
         from cli import SentinelShell
+
         shell = SentinelShell()
 
         assert shell.config == mock_config
@@ -151,9 +170,9 @@ class TestSentinelShellInit:
     @patch("cli.OpenCodeClient")
     @patch("cli.ProxmoxTools")
     @patch("cli.PermissionGate")
-    def test_init_with_full_config(self, mock_gate, mock_proxmox,
-                                     mock_client, mock_db, mock_load_cfg,
-                                     mock_config):
+    def test_init_with_full_config(
+        self, mock_gate, mock_proxmox, mock_client, mock_db, mock_load_cfg, mock_config
+    ):
         """Shell must initialize with full config (Proxmox + LLM)."""
         mock_config["proxmox"] = {
             "host": "192.168.1.100",
@@ -166,6 +185,7 @@ class TestSentinelShellInit:
         mock_proxmox.return_value = MagicMock()
 
         from cli import SentinelShell
+
         shell = SentinelShell()
 
         assert shell.proxmox is not None
@@ -176,20 +196,22 @@ class TestSentinelShellInit:
     @patch("cli.OpenCodeClient")
     @patch("cli.ProxmoxTools")
     @patch("cli.PermissionGate")
-    def test_init_creates_history_dir(self, mock_gate, mock_proxmox,
-                                       mock_client, mock_db, mock_load_cfg,
-                                       mock_config):
+    def test_init_creates_history_dir(
+        self, mock_gate, mock_proxmox, mock_client, mock_db, mock_load_cfg, mock_config
+    ):
         """Shell must create history directory with 0o700 permissions."""
         mock_load_cfg.return_value = mock_config
         mock_client.side_effect = ValueError("No API key")
         mock_proxmox.return_value = None
 
         from cli import HISTORY_FILE, SentinelShell
+
         history_path = Path(HISTORY_FILE)
 
         # Clean up if exists
         if history_path.parent.exists():
             import shutil
+
             shutil.rmtree(history_path.parent)
 
         try:
@@ -203,6 +225,7 @@ class TestSentinelShellInit:
             # Cleanup
             if history_path.parent.exists():
                 import shutil
+
                 shutil.rmtree(history_path.parent)
 
 
@@ -222,12 +245,15 @@ class TestCommandRouting:
             "storage": {"db_path": ":memory:"},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate") as mock_gate:
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate") as mock_gate,
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             yield shell
@@ -308,12 +334,15 @@ class TestChatContextBuilder:
             "storage": {"db_path": ":memory:"},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate"):
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             shell.db = mock_db.return_value
@@ -392,9 +421,15 @@ class TestChatContextBuilder:
                 "updated_at": "2026-05-05T14:32:00Z",
             },
             "health": {
-                "data": {"node": "test-node", "pveversion": "pve-manager/8.4",
-                          "cpu_pct": 10, "mem_pct": 50, "rootfs_pct": 30,
-                          "vm_count": 1, "lxc_count": 1},
+                "data": {
+                    "node": "test-node",
+                    "pveversion": "pve-manager/8.4",
+                    "cpu_pct": 10,
+                    "mem_pct": 50,
+                    "rootfs_pct": 30,
+                    "vm_count": 1,
+                    "lxc_count": 1,
+                },
                 "updated_at": "2026-05-05T14:32:00Z",
             },
             "services": {
@@ -426,12 +461,15 @@ class TestScanCache:
             "storage": {"db_path": ":memory:", "scan_cache_ttl_hours": 24},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate"):
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             shell.db = mock_db.return_value
@@ -440,6 +478,7 @@ class TestScanCache:
     def test_cache_hit_within_ttl(self, shell):
         """Fresh cache (within TTL) must display cached results, not run scan."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         shell.db.get_snapshot.return_value = {
             "updated_at": now,
@@ -473,6 +512,7 @@ class TestScanCache:
     def test_force_bypasses_cache(self, shell):
         """--force flag must bypass cache and run fresh scan."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         shell.db.get_snapshot.return_value = {
             "updated_at": now,
@@ -499,12 +539,18 @@ class TestScanCache:
     def test_cached_digest_shows_summary_note(self, shell):
         """Cached LLM summary must include 'ask a follow-up' note."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         shell.db.get_snapshot.return_value = {
             "updated_at": now,
             "data": {
                 "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
-                "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0, "matched_cves": []},
+                "lxc_result": {
+                    "cves_matched": 0,
+                    "packages_checked": 285,
+                    "duration": 1.0,
+                    "matched_cves": [],
+                },
                 "llm_summary": "No critical issues found.",
                 "repo_summary": "Repos: pve-no-subscription",
             },
@@ -524,6 +570,7 @@ class TestScanCache:
         """Cached digest must show matched CVEs table if present."""
         from datetime import datetime, timezone
         from rich.table import Table
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         shell.db.get_snapshot.return_value = {
             "updated_at": now,
@@ -534,8 +581,13 @@ class TestScanCache:
                     "packages_checked": 285,
                     "duration": 1.0,
                     "matched_cves": [
-                        {"cve_id": "CVE-2026-1234", "package": "openssl",
-                         "version": "3.0.0", "severity": "HIGH", "cvss_score": 7.5},
+                        {
+                            "cve_id": "CVE-2026-1234",
+                            "package": "openssl",
+                            "version": "3.0.0",
+                            "severity": "HIGH",
+                            "cvss_score": 7.5,
+                        },
                     ],
                 },
                 "llm_summary": "",
@@ -557,8 +609,13 @@ class TestScanCache:
 
     def test_naive_timestamp_is_handled_gracefully(self, shell):
         """Naive timestamp (no timezone) must not crash — treated as UTC."""
+        from datetime import UTC, datetime, timedelta
+
+        # Use a recent timestamp (within the 24h cache TTL) so the naive
+        # timestamp is treated as UTC and the cache is actually hit.
+        naive_updated = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
         shell.db.get_snapshot.return_value = {
-            "updated_at": "2026-05-06T08:30:00",  # No Z, no timezone — naive
+            "updated_at": naive_updated,  # No Z, no timezone — naive
             "data": {
                 "host_result": {"cves_found": 30, "packages_checked": 59, "duration": 5.0},
                 "lxc_result": {"cves_matched": 0, "packages_checked": 285, "duration": 1.0},
@@ -604,12 +661,15 @@ class TestConversationHistory:
             "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate"):
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             shell.db = mock_db.return_value
@@ -693,12 +753,15 @@ class TestToolUse:
             "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate"):
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             shell.db = mock_db.return_value
@@ -707,8 +770,9 @@ class TestToolUse:
     def test_tool_request_pattern_detected(self):
         """LLM tool request pattern must be detected by regex."""
         import re
+
         response = "[TOOL:proxmox_api] GET /nodes/kevbot-pve/apt/repositories"
-        match = re.match(r'\[TOOL:(\w+)\]\s+(.*)', response)
+        match = re.match(r"\[TOOL:(\w+)\]\s+(.*)", response)
         assert match is not None
         assert match.group(1) == "proxmox_api"
         assert match.group(2) == "GET /nodes/kevbot-pve/apt/repositories"
@@ -732,6 +796,7 @@ class TestToolUse:
     def test_tool_registry_has_proxmox_api(self):
         """Tool registry must include proxmox_api."""
         from src.tools import TOOL_REGISTRY
+
         assert "proxmox_api" in TOOL_REGISTRY
         assert "purpose" in TOOL_REGISTRY["proxmox_api"]
         assert "access" in TOOL_REGISTRY["proxmox_api"]
@@ -740,6 +805,7 @@ class TestToolUse:
     def test_get_tool_info_returns_string(self):
         """get_tool_info must return non-empty string."""
         from src.tools import get_tool_info
+
         info = get_tool_info()
         assert isinstance(info, str)
         assert len(info) > 50
@@ -768,12 +834,15 @@ class TestBatchOperations:
             "storage": {"db_path": ":memory:", "conversation_history_depth": 10},
             "permissions": {"allowed_write_actions": [], "deny_always": []},
         }
-        with patch("cli.load_config", return_value=mock_config), \
-             patch("cli.Database") as mock_db, \
-             patch("cli.OpenCodeClient", side_effect=ValueError("No API key")), \
-             patch("cli.ProxmoxTools", return_value=None), \
-             patch("cli.PermissionGate"):
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
             from cli import SentinelShell
+
             shell = SentinelShell()
             shell.console = MagicMock()
             shell.db = mock_db.return_value
@@ -782,7 +851,7 @@ class TestBatchOperations:
     def test_batch_pattern_detected(self):
         """Batch tool request pattern must be detected."""
         response = '[TOOL:proxmox_api] BATCH [{"method": "POST", "path": "/nodes/test/qemu", "body": {"vmid": 100}}]'
-        match = re.match(r'\[TOOL:(\w+)\]\s+BATCH\s+(.*)', response, re.DOTALL)
+        match = re.match(r"\[TOOL:(\w+)\]\s+BATCH\s+(.*)", response, re.DOTALL)
         assert match is not None
         assert match.group(1) == "proxmox_api"
         operations = json.loads(match.group(2))
@@ -791,6 +860,7 @@ class TestBatchOperations:
     def test_batch_max_operations(self):
         """Batch exceeding max operations must be rejected."""
         from src.tools import validate_batch, BATCH_OPERATIONS_MAX
+
         ops = [{"method": "GET", "path": "/nodes/test/status"}] * (BATCH_OPERATIONS_MAX + 1)
         valid, error = validate_batch(ops)
         assert not valid
@@ -799,6 +869,7 @@ class TestBatchOperations:
     def test_batch_empty_rejected(self):
         """Empty batch must be rejected."""
         from src.tools import validate_batch
+
         valid, error = validate_batch([])
         assert not valid
         assert "at least one" in error
@@ -806,6 +877,7 @@ class TestBatchOperations:
     def test_batch_not_list_rejected(self):
         """Non-list batch must be rejected."""
         from src.tools import validate_batch
+
         valid, error = validate_batch({"method": "GET", "path": "/test"})
         assert not valid
         assert "JSON array" in error
@@ -813,6 +885,7 @@ class TestBatchOperations:
     def test_blacklist_rejection(self):
         """Blacklisted paths must be rejected."""
         from src.tools import validate_batch
+
         ops = [{"method": "POST", "path": "/nodes/test/stop"}]
         valid, error = validate_batch(ops)
         assert not valid
@@ -821,38 +894,47 @@ class TestBatchOperations:
     def test_firewall_blacklisted(self):
         """Firewall paths must be blacklisted."""
         from src.tools import is_path_blacklisted
+
         assert is_path_blacklisted("/nodes/test/firewall") is True
 
     def test_stop_blacklisted(self):
         """Stop paths must be blacklisted."""
         from src.tools import is_path_blacklisted
+
         assert is_path_blacklisted("/nodes/test/stop") is True
 
     def test_shutdown_blacklisted(self):
         """Shutdown paths must be blacklisted."""
         from src.tools import is_path_blacklisted
+
         assert is_path_blacklisted("/nodes/test/shutdown") is True
 
     def test_migrate_blacklisted(self):
         """Migrate paths must be blacklisted."""
         from src.tools import is_path_blacklisted
+
         assert is_path_blacklisted("/nodes/test/migrate") is True
 
     def test_permissions_blacklisted(self):
         """Permissions paths must be blacklisted."""
         from src.tools import is_path_blacklisted
+
         assert is_path_blacklisted("/nodes/test/permissions") is True
 
     def test_destructive_operation_flagged(self):
         """DELETE operations must be flagged as destructive."""
         from src.tools import describe_api_operation
+
         desc = describe_api_operation("DELETE", "/nodes/test/qemu/100")
         assert "DESTRUCTIVE" in desc
 
     def test_vm_create_description(self):
         """VM create operation must have readable description."""
         from src.tools import describe_api_operation
-        desc = describe_api_operation("POST", "/nodes/test/qemu", {"vmid": 100, "name": "web-01", "cores": 4, "memory": 8192})
+
+        desc = describe_api_operation(
+            "POST", "/nodes/test/qemu", {"vmid": 100, "name": "web-01", "cores": 4, "memory": 8192}
+        )
         assert "web-01" in desc
         assert "100" in desc
         assert "4C" in desc
@@ -860,19 +942,26 @@ class TestBatchOperations:
     def test_lxc_create_description(self):
         """LXC create operation must have readable description."""
         from src.tools import describe_api_operation
-        desc = describe_api_operation("POST", "/nodes/test/lxc", {"vmid": 200, "hostname": "app-01", "cores": 2, "memory": 4096})
+
+        desc = describe_api_operation(
+            "POST",
+            "/nodes/test/lxc",
+            {"vmid": 200, "hostname": "app-01", "cores": 2, "memory": 4096},
+        )
         assert "app-01" in desc
         assert "200" in desc
 
     def test_network_create_description(self):
         """Network create operation must have readable description."""
         from src.tools import describe_api_operation
+
         desc = describe_api_operation("POST", "/nodes/test/network", {"iface": "vmbr1"})
         assert "vmbr1" in desc
 
     def test_valid_batch_passes(self):
         """Valid batch with mixed operations must pass validation."""
         from src.tools import validate_batch
+
         ops = [
             {"method": "POST", "path": "/nodes/test/network", "body": {"iface": "vmbr1"}},
             {"method": "POST", "path": "/nodes/test/qemu", "body": {"vmid": 100, "name": "web-01"}},
@@ -887,14 +976,20 @@ class TestBatchOperations:
         import tempfile
         import os
         from src.tools import (
-            USER_BLACKLIST_PATH, add_to_user_blacklist,
-            remove_from_user_blacklist, get_full_blacklist,
-            BUILTIN_BLACKLIST, _load_user_blacklist, _save_user_blacklist,
+            USER_BLACKLIST_PATH,
+            add_to_user_blacklist,
+            remove_from_user_blacklist,
+            get_full_blacklist,
+            BUILTIN_BLACKLIST,
+            _load_user_blacklist,
+            _save_user_blacklist,
         )
+
         # Use a temp file for testing
         original_path = USER_BLACKLIST_PATH
         test_path = Path(tempfile.gettempdir()) / "test-blacklist.yaml"
         import src.tools
+
         src.tools.USER_BLACKLIST_PATH = test_path
 
         try:
@@ -952,11 +1047,13 @@ class TestBatchOperations:
         assert shell.console.print.call_count >= 1
         # Clean up
         from src.tools import remove_from_user_blacklist
+
         remove_from_user_blacklist("/test/path")
 
     def test_blacklist_remove_command(self, shell):
         """/blacklist remove must remove a path."""
         from src.tools import add_to_user_blacklist, remove_from_user_blacklist
+
         add_to_user_blacklist("/test/remove-me")
         shell._cmd_blacklist(["/blacklist", "remove", "/test/remove-me"])
         assert shell.console.print.call_count >= 1

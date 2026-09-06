@@ -20,7 +20,7 @@
 
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| Validate all input from untrusted sources | ✅ | `src/permission_gate.py:52-53` — empty action validation |
+| Validate all input from untrusted sources | ✅ | `src/permission_gate.py:78-79` — empty action validation |
 | Validate type and range of numeric input | ✅ | `cli.py:750-755` — VMID validated with try/except |
 | Validate against whitelist of allowed values | ✅ | `cli.py:579-583` — `/refresh` type whitelist |
 | Validate file paths against traversal | ✅ | `src/config.py:84-91` — db_path path traversal protection |
@@ -61,7 +61,7 @@
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
 | Enforce least privilege | ✅ | `src/permission_gate.py` — READ/WRITE/DESTRUCTIVE levels |
-| Deny by default for destructive operations | ✅ | `src/permission_gate.py:32-34` — `DENY_ALWAYS` |
+| Deny by default for destructive operations | ✅ | `src/permission_gate.py:49` — `DENY_ALWAYS` |
 | Use cryptographic random for tokens | ✅ | `src/permission_gate.py:7` — `secrets` module |
 | Defense in depth for API operations | ✅ | `src/proxmox_tools.py:355-387` — multiple validation layers |
 
@@ -184,7 +184,7 @@
 |----------|--------|----------|
 | PW 1.1 Follow secure coding practices | ✅ | OWASP + CIS compliance (see above) |
 | PW 2.1 Review AI-generated code | ✅ | All LLM-assisted code reviewed before merge |
-| PW 4.1 Conduct security testing | ✅ | `pytest` test suite (97 tests), `bandit` static analysis |
+| PW 4.1 Conduct security testing | ✅ | `pytest` test suite (174 tests), `bandit` static analysis |
 | PW 5.1 Use static analysis tools | ✅ | `bandit` in dev dependencies |
 
 ### RV — Respond to Vulnerabilities

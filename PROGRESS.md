@@ -541,3 +541,50 @@ Available system context — reference data only. Do NOT re-list findings unless
 **Updated documentation**
 - `AGENTS.md`: Added ruff/mypy commands to Security Scanning section
 - `AGENTS.md`: Updated LLM-Assisted Coding Policy to include ruff + mypy
+
+## 2026-09-06: Pre-Deployment Review Fixes
+
+### Security hardening for new VE deployment ✅ Complete
+
+**Scheduled scanner now scans the real host**
+- `src/scanner_cli.py`: added `_get_host_packages()` — builds `ProxmoxTools` from
+  config and feeds the Proxmox host's installed package inventory into
+  `scan_host()`. Previously the daily timer ran with an empty package list.
+- Graceful fallback: missing config or API failure logs a warning and continues
+  with an empty inventory so the timer never hard-fails.
+
+**Permission gate merges, never replaces**
+- `src/permission_gate.py`: `allowed_write` and `deny_always` are now unions with
+  the built-ins. A custom `deny_always` can no longer drop
+  `destroy/delete/remove/unlink/purge`.
+
+**`run_command` hardened as the API execution boundary**
+- `src/proxmox_tools.py`: DELETE explicitly rejected; `BLOCKED_WRITE_ENDPOINTS`
+  (11 critical endpoints) enforced for all mutating methods as defense-in-depth
+  mirroring the CLI blacklist.
+- `src/tools.py`: `BUILTIN_BLACKLIST` now derives from
+  `proxmox_tools.BLOCKED_WRITE_ENDPOINTS` (single source of truth, no drift).
+
+**Public repo scrub**
+- `AGENTS.md`: removed LXC/host IPs, hostname, Proxmox API identity
+  (`claude@pam!claudeToken`), and absolute user paths; replaced with placeholders.
+
+**Config example updates**
+- `config.yaml.example`: expanded `verify_ssl` guidance (Proxmox CA keyUsage
+  limitation), guest-scanning caveats (QEMU agent / `pct exec` host root), and
+  documented the `deny_always` merge behavior.
+
+**Version**
+- Bumped 0.5.0 → 0.6.0 in `pyproject.toml`, `src/version.py`, and `uv.lock`.
+
+**Tests**
+- 9 new tests: permission-gate merge (2), run_command boundary (3),
+  scanner_cli host packages (4).
+- Fixed stale-date test `test_naive_timestamp_is_handled_gracefully` (hardcoded
+  2026-05-06 had aged past the 24h cache TTL; now uses a dynamic timestamp).
+
+**Results**
+- pytest: 174 passed (12 env-gated skipped)
+- ruff: 0 errors
+- mypy: 0 errors
+- bandit: 0 medium/high

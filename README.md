@@ -178,8 +178,9 @@ uv run pytest tests/ -v
 PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 ```
 
-97 standard tests across 10 modules: config, cve_scanner, database, db_maintenance,
-guardrails, opencode_client, permission_gate, proxmox_tools, setup, snapshot.
+174 tests across 12 modules: cli, config, cve_scanner, database, db_maintenance,
+guardrails, opencode_client, permission_gate, proxmox_tools, scanner_cli, setup,
+snapshot.
 
 Plus 13 conversation tests (env-gated) that verify LLM guardrail compliance:
 no hallucinated commands, no unsolicited tool suggestions, correct verification

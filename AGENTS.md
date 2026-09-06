@@ -7,15 +7,15 @@
 
 | Item | Value |
 |------|-------|
-| LXC | 101, Debian 13, 192.168.2.5, 4C/8GB/32GB |
-| Proxmox host | kevbot-pve, 192.168.2.146 |
-| SSH | `ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5` |
+| LXC | 101, Debian 13, `<lxc-ip>`, 4C/8GB/32GB |
+| Proxmox host | `<hostname>`, `<host-ip>` |
+| SSH | `ssh -i ~/.ssh/id_ed25519_pve-sentinel <user>@<lxc-ip>` |
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 138 passing (+13 env-gated conversation tests) |
-| Python venv | `/home/kevbot/advisory/.venv` (uv-managed) |
-| Proxmox API | `claude@pam!claudeToken` (ClaudeDevbox role) |
+| Tests | `uv run pytest tests/` — 174 passing (+13 env-gated conversation tests) |
+| Python venv | `~/advisory/.venv` (uv-managed) |
+| Proxmox API | `<user>@pam!<token-name>` (least-privilege API role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
 | Version | 0.6.0 |
 
@@ -216,20 +216,20 @@ No `.bashrc` or `.profile` sourcing needed — dotenv handles it at import time.
 
 LXC was created via Proxmox API with Debian 13 template. SSH key injection worked on the raw API call (not proxmoxer). The key insight: the `+` characters in SSH keys cause URL-encoding issues with proxmoxer but not with `requests.post(data=...)`.
 
-LXC network: bridge vmbr0, static IP 192.168.2.5/24, gw 192.168.2.1, DNS 192.168.2.1 + 1.1.1.1.
+LXC network: bridge vmbr0, static IP `<lxc-ip>`/24, gw `<gateway>`, DNS `<gateway>` + 1.1.1.1.
 
 ## Test Commands
 
 ```bash
 # Standard tests (fast, no API calls):
-cd /var/home/kevbot/pve-sentinel
+cd ~/pve-sentinel
 uv run pytest tests/ -v
 
 # Conversation tests (live LLM, env-gated):
 PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 
 # On LXC:
-ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5
+ssh -i ~/.ssh/id_ed25519_pve-sentinel <user>@<lxc-ip>
 cd advisory
 uv run pytest tests/ -v
 ```
@@ -263,13 +263,13 @@ Does not affect future CVE detection (NVD fetch is independent of DB contents).
 ## Sync to LXC
 
 ```bash
-cd /var/home/kevbot/pve-sentinel
+cd ~/pve-sentinel
 tar czf /tmp/pve-sentinel-update.tar.gz \
   --exclude='.git' --exclude='.venv' --exclude='__pycache__' \
   --exclude='.pytest_cache' --exclude='sentinel.db' \
   . 2>/dev/null
 cat /tmp/pve-sentinel-update.tar.gz | \
-  ssh -i ~/.ssh/id_ed25519_pve-sentinel kevbot@192.168.2.5 \
+  ssh -i ~/.ssh/id_ed25519_pve-sentinel <user>@<lxc-ip> \
   'cd advisory && tar xzf -'
 ```
 
@@ -286,14 +286,14 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `src/proxmox_tools.py` | proxmoxer API-only (no pvesh), get_host_repos, dynamic traversal | ✅ Phase 6 |
 | `src/permission_gate.py` | READ/WRITE/DESTRUCTIVE, secrets.choice, DENY_ALWAYS | ✅ Hardened |
 | `src/setup.py` | Setup helper: cert fetch, connectivity verify | ✅ Phase 4.5 |
-| `src/scanner_cli.py` | systemd timer entry point, host + local LXC scan | ✅ Phase 5 |
+| `src/scanner_cli.py` | systemd timer entry point, host package + local LXC scan | ✅ Phase 5 |
 | `src/framework_data/nist_csf_ai.yaml` | NIST CSF 2.0 + AI considerations | ✅ Complete |
 | `config.yaml.example` | Anonymized configuration template | ✅ Updated |
 | `systemd/cve-scanner.service` | Daily scan service (EnvironmentFile=.env) | ✅ Phase 5 |
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |
 | `systemd/cve-digest.timer` | Weekly digest timer (Mon 08:00 UTC) | ✅ Phase 5 |
-| `tests/` | 138 tests across 11 modules | ✅ Complete |
+| `tests/` | 174 tests across 12 modules | ✅ Complete |
 
 ## On-LXC File Locations
 

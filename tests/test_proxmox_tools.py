@@ -43,9 +43,7 @@ class TestProxmoxToolsGetNode:
     @patch("src.proxmox_tools.ProxmoxAPI")
     def test_uses_configured_node(self, mock_api):
         """Returns configured node without API call."""
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v", node="pve1"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
         assert tools._get_node() == "pve1"
 
     @patch("src.proxmox_tools.ProxmoxAPI")
@@ -55,9 +53,7 @@ class TestProxmoxToolsGetNode:
         mock_instance.nodes.get.return_value = [{"node": "pve-node-01"}]
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         assert tools._get_node() == "pve-node-01"
 
     @patch("src.proxmox_tools.ProxmoxAPI")
@@ -67,9 +63,7 @@ class TestProxmoxToolsGetNode:
         mock_instance.nodes.get.return_value = []
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         with pytest.raises(RuntimeError, match="No Proxmox nodes found"):
             tools._get_node()
 
@@ -81,22 +75,33 @@ class TestProxmoxToolsGetStatus:
         mock_instance = MagicMock()
         mock_instance.nodes.get.return_value = [{"node": "pve1"}]
         mock_instance.nodes.return_value.status.get.return_value = {
-            "cpu": 0.25, "memory": {"used": 4096, "total": 8192}
+            "cpu": 0.25,
+            "memory": {"used": 4096, "total": 8192},
         }
         mock_instance.nodes.return_value.qemu.get.return_value = [
-            {"vmid": 100, "name": "web", "status": "running", "cpus": 2,
-             "maxmem": 4294967296, "uptime": 86400}
+            {
+                "vmid": 100,
+                "name": "web",
+                "status": "running",
+                "cpus": 2,
+                "maxmem": 4294967296,
+                "uptime": 86400,
+            }
         ]
         mock_instance.nodes.return_value.lxc.get.return_value = [
-            {"vmid": 101, "name": "sentinel", "status": "running", "cpus": 4,
-             "maxmem": 8589934592, "uptime": 3600}
+            {
+                "vmid": 101,
+                "name": "sentinel",
+                "status": "running",
+                "cpus": 4,
+                "maxmem": 8589934592,
+                "uptime": 3600,
+            }
         ]
         mock_instance.nodes.return_value.storage.get.return_value = []
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         status = tools.get_status()
 
         assert status["node"] == "pve1"
@@ -114,9 +119,7 @@ class TestProxmoxToolsRunCommand:
         mock_instance.nodes.pve1.status.get.return_value = {"data": "ok"}
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v", node="pve1"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
         result = tools.run_command("/nodes/pve1/status", method="get")
         assert result == {"data": "ok"}
 
@@ -125,9 +128,7 @@ class TestProxmoxToolsRunCommand:
         """Destructive paths are blocked with PermissionError."""
         mock_api.return_value = MagicMock()
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v", node="pve1"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
 
         with pytest.raises(PermissionError, match="Destructive operation blocked"):
             tools.run_command("/nodes/pve1/qemu/100/destroy", method="post")
@@ -137,12 +138,44 @@ class TestProxmoxToolsRunCommand:
         """Write paths raise PermissionError directing to CLI gate."""
         mock_api.return_value = MagicMock()
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v", node="pve1"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
 
         with pytest.raises(PermissionError, match="requires permission gate"):
             tools.run_command("/nodes/pve1/qemu/100/status/start", method="post")
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_delete_method_blocked(self, mock_api):
+        """DELETE is never permitted through run_command, even with a body."""
+        mock_api.return_value = MagicMock()
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        with pytest.raises(PermissionError, match="DELETE operations are not permitted"):
+            tools.run_command("/nodes/pve1/qemu/100", method="delete", body={})
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_blocked_critical_endpoint_write(self, mock_api):
+        """Writes to a blacklisted critical endpoint are blocked at the API boundary."""
+        mock_api.return_value = MagicMock()
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        with pytest.raises(PermissionError, match="critical path blacklist"):
+            tools.run_command("/nodes/pve1/lxc/100/status/stop", method="post", body={})
+
+    @patch("src.proxmox_tools.ProxmoxAPI")
+    def test_allowed_write_executes(self, mock_api):
+        """A non-blocked POST with a body executes through the API traversal."""
+        mock_instance = MagicMock()
+        mock_api.return_value = mock_instance
+
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v", node="pve1")
+
+        traversed = getattr(mock_instance.nodes.pve1.qemu, "100").status.start
+        traversed.post.return_value = {"upid": "UPID:pve1:00000123"}
+
+        result = tools.run_command("/nodes/pve1/qemu/100/status/start", method="post", body={})
+        assert result == {"upid": "UPID:pve1:00000123"}
 
 
 class TestProxmoxToolsGetHostPackages:
@@ -152,18 +185,28 @@ class TestProxmoxToolsGetHostPackages:
         mock_instance = MagicMock()
         mock_instance.nodes.get.return_value = [{"node": "pve1"}]
         mock_instance.nodes.return_value.apt.versions.get.return_value = [
-            {"Package": "pve-manager", "OldVersion": "9.1.6", "Arch": "all",
-             "CurrentState": "Installed"},
-            {"Package": "qemu-server", "OldVersion": "9.1.4", "Arch": "amd64",
-             "CurrentState": "Installed"},
-            {"Package": "old-kernel", "OldVersion": "6.8.0", "Arch": "amd64",
-             "CurrentState": "NotInstalled"},
+            {
+                "Package": "pve-manager",
+                "OldVersion": "9.1.6",
+                "Arch": "all",
+                "CurrentState": "Installed",
+            },
+            {
+                "Package": "qemu-server",
+                "OldVersion": "9.1.4",
+                "Arch": "amd64",
+                "CurrentState": "Installed",
+            },
+            {
+                "Package": "old-kernel",
+                "OldVersion": "6.8.0",
+                "Arch": "amd64",
+                "CurrentState": "NotInstalled",
+            },
         ]
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         packages = tools.get_host_packages()
 
         assert len(packages) == 2
@@ -191,9 +234,7 @@ class TestProxmoxToolsGetHostRepos:
         }
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         repos = tools.get_host_repos()
 
         assert len(repos["standard_repos"]) == 2
@@ -227,9 +268,7 @@ class TestProxmoxToolsGetHealth:
         mock_instance.cluster.resources.get.return_value = []
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         health = tools.get_health()
 
         assert health["node"] == "pve1"
@@ -252,9 +291,7 @@ class TestProxmoxToolsGetRRDMetrics:
         ]
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         data = tools.get_rrd_metrics(timeframe="hour")
 
         assert len(data) == 2
@@ -273,9 +310,7 @@ class TestProxmoxToolsGetServiceStatus:
         ]
         mock_api.return_value = mock_instance
 
-        tools = ProxmoxTools(
-            host="h", user="u", token_name="t", token_value="v"
-        )
+        tools = ProxmoxTools(host="h", user="u", token_name="t", token_value="v")
         services = tools.get_service_status()
 
         assert len(services) == 2

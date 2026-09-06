@@ -12,26 +12,49 @@ from enum import Enum
 
 class ActionLevel(Enum):
     """Classification for Proxmox API actions."""
+
     READ = "read"
     WRITE = "write"
     DESTRUCTIVE = "destructive"
 
 
 # Actions that require "confirm" (single-word approval)
-WRITE_ACTIONS = frozenset({
-    "start", "stop", "reset", "shutdown", "reboot",
-    "suspend", "resume", "create", "clone", "migrate",
-})
+WRITE_ACTIONS = frozenset(
+    {
+        "start",
+        "stop",
+        "reset",
+        "shutdown",
+        "reboot",
+        "suspend",
+        "resume",
+        "create",
+        "clone",
+        "migrate",
+    }
+)
 
 # Actions that require "CONFIRM-XXXXXX" (random 6-char token)
-DESTRUCTIVE_ACTIONS = frozenset({
-    "destroy", "remove", "delete", "unlink", "purge",
-})
+DESTRUCTIVE_ACTIONS = frozenset(
+    {
+        "destroy",
+        "remove",
+        "delete",
+        "unlink",
+        "purge",
+    }
+)
 
 # Always denied — no confirmation can override (CIS L1 least privilege)
-DENY_ALWAYS = frozenset({
-    "destroy", "remove", "delete", "unlink", "purge",
-})
+DENY_ALWAYS = frozenset(
+    {
+        "destroy",
+        "remove",
+        "delete",
+        "unlink",
+        "purge",
+    }
+)
 
 
 class PermissionGate:
@@ -43,8 +66,11 @@ class PermissionGate:
         deny_always: set[str] | None = None,
         confirm_callback: Callable[[str, str], bool] | None = None,
     ):
-        self.allowed_write = allowed_write or set(WRITE_ACTIONS)
-        self.deny_always = deny_always or set(DENY_ALWAYS)
+        # Merge (union) config values with the built-in defaults instead of
+        # replacing them — a custom deny list must add to, never weaken,
+        # the built-in DENY_ALWAYS protections.
+        self.allowed_write = set(WRITE_ACTIONS) | (allowed_write or set())
+        self.deny_always = set(DENY_ALWAYS) | (deny_always or set())
         self._confirm_callback = confirm_callback or self._default_confirm
 
     def classify(self, action: str) -> ActionLevel:
@@ -92,11 +118,7 @@ class PermissionGate:
             )
             return self._confirm_callback(prompt, f"CONFIRM-{token}")
 
-        prompt = (
-            f"\n  Write operation: {action}\n"
-            f"  {detail}\n\n"
-            f"  Type 'confirm' to proceed: "
-        )
+        prompt = f"\n  Write operation: {action}\n  {detail}\n\n  Type 'confirm' to proceed: "
         return self._confirm_callback(prompt, "confirm")
 
     def _generate_token(self, length: int = 6) -> str:

@@ -84,3 +84,17 @@ class TestPermissionGate:
         assert gate.classify("get_destroy_log") == ActionLevel.READ
         # "undestroy" should NOT match "destroy"
         assert gate.classify("undestroy") == ActionLevel.WRITE
+
+    def test_custom_deny_always_merges_with_builtins(self):
+        """Custom deny_always adds to, never replaces, the built-in DENY_ALWAYS."""
+        gate = PermissionGate(deny_always={"wipe"})
+        assert gate.classify("wipe") == ActionLevel.DESTRUCTIVE
+        for action in DENY_ALWAYS:
+            assert gate.classify(action) == ActionLevel.DESTRUCTIVE
+
+    def test_custom_allowed_write_merges_with_builtins(self):
+        """Custom allowed_write adds to, never replaces, the built-in WRITE_ACTIONS."""
+        gate = PermissionGate(allowed_write={"backup"})
+        assert gate.classify("backup") == ActionLevel.WRITE
+        assert gate.classify("start") == ActionLevel.WRITE
+        assert gate.classify("clone") == ActionLevel.WRITE

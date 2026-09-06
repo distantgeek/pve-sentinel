@@ -8,16 +8,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .proxmox_tools import BLOCKED_WRITE_ENDPOINTS
+
 # ── Constants ───────────────────────────────────────────────────────
 
 BATCH_OPERATIONS_MAX = 5
 
-BUILTIN_BLACKLIST = [
-    "/stop", "/shutdown", "/reboot", "/reset",
-    "/migrate", "/move", "/resize",
-    "/acl", "/permissions", "/user", "/group",
-    "/firewall",
-]
+# Single source of truth lives in src/proxmox_tools.py (the API boundary);
+# the CLI-level blacklist mirrors it so enforcement stays in sync.
+BUILTIN_BLACKLIST = sorted(BLOCKED_WRITE_ENDPOINTS)
 
 DESTRUCTIVE_METHODS = {"DELETE"}
 
@@ -50,12 +49,14 @@ def get_tool_info() -> str:
 
 # ── Blacklist management ───────────────────────────────────────────
 
+
 def _load_user_blacklist() -> list[str]:
     """Load user blacklist from YAML file."""
     if not USER_BLACKLIST_PATH.exists():
         return []
     try:
         import yaml
+
         with open(USER_BLACKLIST_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f)
             return data.get("paths", []) if data else []
@@ -67,6 +68,7 @@ def _save_user_blacklist(paths: list[str]) -> None:
     """Save user blacklist to YAML file."""
     USER_BLACKLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     import yaml
+
     with open(USER_BLACKLIST_PATH, "w", encoding="utf-8") as f:
         yaml.dump({"paths": paths}, f, default_flow_style=False)
 
@@ -106,14 +108,17 @@ def remove_from_user_blacklist(path: str) -> tuple[bool, str]:
 
 # ── Operation description ──────────────────────────────────────────
 
+
 def describe_api_operation(method: str, path: str, body: dict | None = None) -> str:
     """Generate human-readable description of an API operation."""
     body = body or {}
 
     # VM operations
     if method == "POST" and "/qemu" in path:
-        return (f"Create VM '{body.get('name', '?')}' (VMID {body.get('vmid', '?')})"
-                f" — {body.get('cores', '?')}C/{body.get('memory', '?')}MB")
+        return (
+            f"Create VM '{body.get('name', '?')}' (VMID {body.get('vmid', '?')})"
+            f" — {body.get('cores', '?')}C/{body.get('memory', '?')}MB"
+        )
     elif method == "PUT" and "/qemu" in path and "/config" in path:
         return f"Modify VM {path.split('/')[-2]} config"
     elif method == "DELETE" and "/qemu" in path:
@@ -121,8 +126,10 @@ def describe_api_operation(method: str, path: str, body: dict | None = None) -> 
 
     # LXC operations
     elif method == "POST" and "/lxc" in path:
-        return (f"Create LXC '{body.get('hostname', '?')}' (CTID {body.get('vmid', '?')})"
-                f" — {body.get('cores', '?')}C/{body.get('memory', '?')}MB")
+        return (
+            f"Create LXC '{body.get('hostname', '?')}' (CTID {body.get('vmid', '?')})"
+            f" — {body.get('cores', '?')}C/{body.get('memory', '?')}MB"
+        )
     elif method == "DELETE" and "/lxc" in path:
         return f"Delete LXC {path.split('/')[-2]} — ⚠️ DESTRUCTIVE"
 
@@ -147,6 +154,7 @@ def describe_api_operation(method: str, path: str, body: dict | None = None) -> 
 
 # ── Batch validation ───────────────────────────────────────────────
 
+
 def validate_batch(operations: list) -> tuple[bool, str]:
     """Validate a batch of operations. Returns (valid, error_message)."""
     if not isinstance(operations, list):
@@ -161,10 +169,10 @@ def validate_batch(operations: list) -> tuple[bool, str]:
         path = op.get("path", "")
 
         if is_path_blacklisted(path):
-            return False, f"Operation {i+1} blocked: {path} is on the critical path blacklist"
+            return False, f"Operation {i + 1} blocked: {path} is on the critical path blacklist"
 
         if method not in ("GET", "POST", "PUT", "DELETE"):
-            return False, f"Operation {i+1} has invalid method: {method}"
+            return False, f"Operation {i + 1} has invalid method: {method}"
 
     return True, ""
 
@@ -199,9 +207,7 @@ def execute_proxmox_api(
         return {"success": False, "error": str(e)}
 
 
-def execute_tool(
-    tool_name: str, tool_args: str, proxmox: Any
-) -> dict[str, Any]:
+def execute_tool(tool_name: str, tool_args: str, proxmox: Any) -> dict[str, Any]:
     """Route tool execution to the appropriate handler.
 
     Args:

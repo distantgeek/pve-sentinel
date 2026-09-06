@@ -8,14 +8,51 @@ from typing import Any
 
 from proxmoxer import ProxmoxAPI  # type: ignore[import-untyped]
 
+# Critical API path segments that must never be reachable through the dynamic
+# run_command() write path. This mirrors the CLI-level blacklist (src/tools.py)
+# and acts as defense-in-depth at the API boundary — even if a caller forgets
+# to run the permission gate, these endpoints stay blocked.
+BLOCKED_WRITE_ENDPOINTS = frozenset(
+    {
+        "/stop",
+        "/shutdown",
+        "/reboot",
+        "/reset",
+        "/migrate",
+        "/move",
+        "/resize",
+        "/acl",
+        "/permissions",
+        "/user",
+        "/group",
+        "/firewall",
+    }
+)
+
+# Path keywords that are always rejected for any method.
+DESTRUCTIVE_PATH_KEYWORDS = frozenset(
+    {
+        "destroy",
+        "delete",
+        "remove",
+        "unlink",
+        "purge",
+    }
+)
+
 
 class ProxmoxTools:
     """Read and (permission-gated) write operations on the Proxmox API."""
 
     # Read-only API paths that bypass permission gates (GET only)
-    READ_ONLY_PATHS = frozenset({
-        "/nodes", "/status", "/cluster/status", "/version",
-    })
+    READ_ONLY_PATHS = frozenset(
+        {
+            "/nodes",
+            "/status",
+            "/cluster/status",
+            "/version",
+        }
+    )
 
     def __init__(
         self,
@@ -133,12 +170,14 @@ class ProxmoxTools:
         try:
             disk_list = self.api.nodes(node).disks.list.get()
             for d in disk_list:
-                disks.append({
-                    "devpath": d.get("devpath", ""),
-                    "model": d.get("model", ""),
-                    "size_gb": d.get("size", 0) // 1024**3,
-                    "health": d.get("health", "unknown"),
-                })
+                disks.append(
+                    {
+                        "devpath": d.get("devpath", ""),
+                        "model": d.get("model", ""),
+                        "size_gb": d.get("size", 0) // 1024**3,
+                        "health": d.get("health", "unknown"),
+                    }
+                )
         except Exception:
             pass  # Disk listing may require elevated permissions
 
@@ -147,10 +186,12 @@ class ProxmoxTools:
         try:
             svc_list = self.api.nodes(node).services.get()
             for s in svc_list:
-                services.append({
-                    "name": s.get("name", ""),
-                    "state": s.get("state", "unknown"),
-                })
+                services.append(
+                    {
+                        "name": s.get("name", ""),
+                        "state": s.get("state", "unknown"),
+                    }
+                )
         except Exception:
             pass
 
@@ -227,10 +268,7 @@ class ProxmoxTools:
         """All Proxmox services with running/dead state."""
         node = self._get_node()
         services = self.api.nodes(node).services.get()
-        return [
-            {"name": s.get("name", ""), "state": s.get("state", "unknown")}
-            for s in services
-        ]
+        return [{"name": s.get("name", ""), "state": s.get("state", "unknown")} for s in services]
 
     def get_host_packages(self) -> list[dict[str, str]]:
         """Get installed packages on the Proxmox host via API.
@@ -240,8 +278,11 @@ class ProxmoxTools:
         """
         versions = self.api.nodes(self._get_node()).apt.versions.get()
         return [
-            {"name": v["Package"], "version": v.get("OldVersion", ""),
-             "architecture": v.get("Arch", "")}
+            {
+                "name": v["Package"],
+                "version": v.get("OldVersion", ""),
+                "architecture": v.get("Arch", ""),
+            }
             for v in versions
             if v.get("CurrentState") == "Installed"
         ]
@@ -256,17 +297,15 @@ class ProxmoxTools:
 
         standard = []
         for r in repos.get("standard-repos", []):
-            standard.append({
-                "name": r.get("name", ""),
-                "handle": r.get("handle", ""),
-                "enabled": r.get("status", 0) == 1,
-            })
+            standard.append(
+                {
+                    "name": r.get("name", ""),
+                    "handle": r.get("handle", ""),
+                    "enabled": r.get("status", 0) == 1,
+                }
+            )
 
-        warnings = [
-            i["message"]
-            for i in repos.get("infos", [])
-            if i.get("kind") == "warning"
-        ]
+        warnings = [i["message"] for i in repos.get("infos", []) if i.get("kind") == "warning"]
 
         return {
             "standard_repos": standard,
@@ -288,7 +327,9 @@ class ProxmoxTools:
         try:
             os_check = subprocess.run(
                 ["pct", "exec", str(lxc_id), "--", "cat", "/etc/os-release"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         except subprocess.TimeoutExpired:
             return []
@@ -312,18 +353,22 @@ class ProxmoxTools:
         try:
             result = subprocess.run(
                 ["pct", "exec", str(lxc_id), "--", *cmd],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if result.returncode == 0 and result.stdout.strip():
                 packages = []
                 for line in result.stdout.strip().split("\n"):
                     parts = line.split("\t")
                     if len(parts) >= 2:
-                        packages.append({
-                            "name": parts[0],
-                            "version": parts[1],
-                            "architecture": parts[2] if len(parts) > 2 else "",
-                        })
+                        packages.append(
+                            {
+                                "name": parts[0],
+                                "version": parts[1],
+                                "architecture": parts[2] if len(parts) > 2 else "",
+                            }
+                        )
                 return packages
         except subprocess.TimeoutExpired:
             pass
@@ -354,29 +399,54 @@ class ProxmoxTools:
     def run_command(self, api_path: str, method: str = "get", body: dict | None = None) -> dict:
         """Run an arbitrary Proxmox API command.
 
-        SECURITY: This method validates the path against a read-only allowlist.
-        Write/modify paths must go through specific methods with permission gates.
+        SECURITY: This is the API execution boundary.
+
+        * GET is restricted to the read-only path allowlist.
+        * POST/PUT require a body and must not target a destructive keyword
+          or a blocked critical endpoint (defense-in-depth mirror of the
+          CLI-level blacklist).
+        * DELETE is always rejected here; destructive operations must go
+          through dedicated, permission-gated methods.
         """
-        # Block destructive paths entirely
+        method_lower = method.lower()
         lower_path = api_path.lower()
-        for keyword in ("destroy", "delete", "remove", "unlink", "purge"):
+
+        # Block destructive paths entirely (any method)
+        for keyword in DESTRUCTIVE_PATH_KEYWORDS:
             if keyword in lower_path:
                 raise PermissionError(
                     f"Destructive operation blocked: '{keyword}' in path '{api_path}'. "
                     "Use specific methods with permission gates instead."
                 )
 
-        # Allow read-only paths without restriction
+        # Read-only paths are allowed for GET only
         for allowed in self.READ_ONLY_PATHS:
             if api_path.startswith(allowed):
-                resource = self._api_traverse(api_path)
-                if method.lower() == "get":
+                if method_lower == "get":
+                    resource = self._api_traverse(api_path)
                     return resource.get()
+                break
+
+        # DELETE is never permitted through the dynamic command path
+        if method_lower == "delete":
+            raise PermissionError(
+                f"DELETE operations are not permitted through run_command ('{api_path}'). "
+                "Use specific methods with permission gates instead."
+            )
+
+        # Block critical endpoints for any mutating method (defense-in-depth;
+        # the CLI layer enforces the same list before confirmation)
+        for endpoint in BLOCKED_WRITE_ENDPOINTS:
+            if endpoint in lower_path:
+                raise PermissionError(
+                    f"Write operation blocked: '{endpoint}' in path '{api_path}' "
+                    "is on the critical path blacklist."
+                )
 
         # Write methods — permission gate is handled by CLI layer before calling
-        if method.lower() in ("post", "put") and body is not None:
+        if method_lower in ("post", "put") and body is not None:
             resource = self._api_traverse(api_path)
-            return resource.post(**body) if method.lower() == "post" else resource.put(**body)
+            return resource.post(**body) if method_lower == "post" else resource.put(**body)
 
         # All other paths require explicit permission gate (handled by CLI layer)
         raise PermissionError(

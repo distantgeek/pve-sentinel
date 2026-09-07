@@ -138,13 +138,15 @@ class SentinelShell:
             }
 
     def _init_client(self) -> OpenCodeClient | None:
-        """Initialize OpenCode Go client, or None if API key missing."""
+        """Initialize OpenCode client, or None if API key missing."""
         try:
             guard = self.config.get("guardrails", {})
+            model_cfg = self.config.get("model", {})
             return OpenCodeClient(
-                model=self.config.get("model", {}).get("model_id", "glm-5.1"),
+                model=model_cfg.get("model_id", "glm-5.1"),
                 guardrail_preset=guard.get("preset") if guard.get("enabled") else None,
                 guardrail_custom=guard.get("custom"),
+                fallback=model_cfg.get("fallback", []),
             )
         except ValueError as e:
             self.console.print(

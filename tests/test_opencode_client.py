@@ -70,9 +70,7 @@ class TestOpenCodeClientAsk:
     def test_ask_returns_response_text(self, mock_client_cls):
         """Ask returns the model's response content."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Hello, world!"}}]
-        }
+        mock_response.json.return_value = {"choices": [{"message": {"content": "Hello, world!"}}]}
         mock_response.raise_for_status = MagicMock()
         mock_client = MagicMock()
         mock_client.post.return_value = mock_response
@@ -87,9 +85,7 @@ class TestOpenCodeClientAsk:
     def test_ask_includes_system_message(self, mock_client_cls):
         """Ask includes system message when provided."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "ok"}}]
-        }
+        mock_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         mock_response.raise_for_status = MagicMock()
         mock_client = MagicMock()
         mock_client.post.return_value = mock_response
@@ -137,6 +133,126 @@ class TestOpenCodeClientAsk:
             assert client.ask("test") == ""
 
 
+class TestOpenCodeClientFallback:
+    def _http_error(self, status: int = 429) -> httpx.HTTPStatusError:
+        error_response = MagicMock()
+        error_response.text = "Rate limit exceeded"
+        error_response.status_code = status
+        return httpx.HTTPStatusError("Rate limited", request=MagicMock(), response=error_response)
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_fallback_used_when_primary_fails(self, mock_client_cls):
+        """Fallback provider is tried when the primary returns an error."""
+        primary = MagicMock()
+        primary.post.side_effect = self._http_error(429)
+        fallback = MagicMock()
+        fallback_response = MagicMock()
+        fallback_response.json.return_value = {
+            "choices": [{"message": {"content": "Fallback response"}}]
+        }
+        fallback_response.raise_for_status = MagicMock()
+        fallback.post.return_value = fallback_response
+        mock_client_cls.side_effect = [primary, fallback]
+
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(
+                fallback=[{"provider": "opencode-zen", "model_id": "mimo-v2.5-free"}]
+            )
+            result = client.ask("test")
+            assert result == "Fallback response"
+
+        # Fallback client must use the Zen base URL and mimo-v2.5-free model
+        fb_call = fallback.post.call_args
+        assert fb_call[1]["json"]["model"] == "mimo-v2.5-free"
+        fb_client_kwargs = mock_client_cls.call_args_list[1].kwargs
+        assert str(fb_client_kwargs["base_url"]).rstrip("/") == "https://opencode.ai/zen/v1"
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_fallback_not_tried_on_success(self, mock_client_cls):
+        """Fallback is not contacted when the primary succeeds."""
+        primary = MagicMock()
+        primary_response = MagicMock()
+        primary_response.json.return_value = {
+            "choices": [{"message": {"content": "Primary response"}}]
+        }
+        primary_response.raise_for_status = MagicMock()
+        primary.post.return_value = primary_response
+        mock_client_cls.return_value = primary
+
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(
+                fallback=[{"provider": "opencode-zen", "model_id": "mimo-v2.5-free"}]
+            )
+            assert client.ask("test") == "Primary response"
+            assert mock_client_cls.call_count == 1
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_all_fail_raises_combined_error(self, mock_client_cls):
+        """Raises a combined error when primary and all fallbacks fail."""
+        primary = MagicMock()
+        primary.post.side_effect = self._http_error(429)
+        fallback = MagicMock()
+        fallback.post.side_effect = self._http_error(500)
+        mock_client_cls.side_effect = [primary, fallback]
+
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(
+                fallback=[{"provider": "opencode-zen", "model_id": "mimo-v2.5-free"}]
+            )
+            with pytest.raises(RuntimeError, match="All LLM providers failed"):
+                client.ask("test")
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_fallback_uses_separate_api_key_env(self, mock_client_cls):
+        """Fallback uses api_key_env override when configured."""
+        primary = MagicMock()
+        primary.post.side_effect = self._http_error(429)
+        fallback = MagicMock()
+        fallback_response = MagicMock()
+        fallback_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        fallback_response.raise_for_status = MagicMock()
+        fallback.post.return_value = fallback_response
+        mock_client_cls.side_effect = [primary, fallback]
+
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_GO_API_KEY": "k", "OPENCODE_ZEN_API_KEY": "zen-key"},
+        ):
+            client = OpenCodeClient(
+                fallback=[
+                    {
+                        "provider": "opencode-zen",
+                        "model_id": "mimo-v2.5-free",
+                        "api_key_env": "OPENCODE_ZEN_API_KEY",
+                    }
+                ]
+            )
+            assert client.ask("test") == "ok"
+            # Fallback client must be built with the Zen key
+            fb_client_kwargs = mock_client_cls.call_args_list[1].kwargs
+            assert fb_client_kwargs["headers"]["Authorization"] == "Bearer zen-key"
+
+    @patch("src.opencode_client.httpx.Client")
+    def test_fallback_uses_primary_key_by_default(self, mock_client_cls):
+        """Fallback reuses the primary API key when api_key_env is omitted."""
+        primary = MagicMock()
+        primary.post.side_effect = self._http_error(429)
+        fallback = MagicMock()
+        fallback_response = MagicMock()
+        fallback_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        fallback_response.raise_for_status = MagicMock()
+        fallback.post.return_value = fallback_response
+        mock_client_cls.side_effect = [primary, fallback]
+
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
+            client = OpenCodeClient(
+                fallback=[{"provider": "opencode-zen", "model_id": "mimo-v2.5-free"}]
+            )
+            assert client.ask("test") == "ok"
+            fb_client_kwargs = mock_client_cls.call_args_list[1].kwargs
+            assert fb_client_kwargs["headers"]["Authorization"] == "Bearer k"
+
+
 class TestOpenCodeClientContextManager:
     @patch("src.opencode_client.httpx.Client")
     def test_context_manager_closes_client(self, mock_client_cls):
@@ -155,7 +271,7 @@ class TestOpenCodeClientZenProvider:
         """Zen provider uses the free tier base URL."""
         with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "k"}):
             client = OpenCodeClient(provider="opencode-zen")
-            assert str(client._client.base_url).rstrip("/") == "https://zen.opencode.ai/v1"
+            assert str(client._client.base_url).rstrip("/") == "https://opencode.ai/zen/v1"
 
     def test_zen_provider_default_model(self):
         """Zen provider defaults to glm-4."""
@@ -186,9 +302,7 @@ class TestOpenCodeClientZenProvider:
     def test_zen_provider_ask_works(self, mock_client_cls):
         """Zen provider ask endpoint works identically."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "Zen response"}}]
-        }
+        mock_response.json.return_value = {"choices": [{"message": {"content": "Zen response"}}]}
         mock_response.raise_for_status = MagicMock()
         mock_client = MagicMock()
         mock_client.post.return_value = mock_response

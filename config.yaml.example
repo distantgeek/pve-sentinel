@@ -10,6 +10,18 @@ model:
   #   opencode-go: glm-5.1 (recommended for advisory tasks)
   #   opencode-zen: glm-4 (free tier)
   model_id: glm-5.1
+
+  # Fallback providers tried automatically when the primary fails
+  # (rate limit, auth error, or server error). Tried in order.
+  # Each entry:
+  #   provider:    opencode-go | opencode-zen
+  #   model_id:    model to use (e.g. mimo-v2.5-free on the free tier)
+  #   api_key_env: (optional) env var for a different key; defaults to
+  #                the primary key (OPENCODE_GO_API_KEY)
+  #   api_base:    (optional) override the provider's default base URL
+  fallback:
+    - provider: opencode-zen
+      model_id: mimo-v2.5-free
   
   # For non-OpenCode providers, uncomment:
   # api_base: https://api.openai.com/v1

@@ -187,7 +187,7 @@ see [`docs/proxmox-acl.md`](docs/proxmox-acl.md).
 |----------|--------|----------|
 | PW 1.1 Follow secure coding practices | ✅ | OWASP + CIS compliance (see above) |
 | PW 2.1 Review AI-generated code | ✅ | All LLM-assisted code reviewed before merge |
-| PW 4.1 Conduct security testing | ✅ | `pytest` test suite (174 tests), `bandit` static analysis |
+| PW 4.1 Conduct security testing | ✅ | `pytest` test suite (185 tests), `bandit` static analysis |
 | PW 5.1 Use static analysis tools | ✅ | `bandit` in dev dependencies |
 
 ### RV — Respond to Vulnerabilities

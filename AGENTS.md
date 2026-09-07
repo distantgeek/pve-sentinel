@@ -13,7 +13,7 @@
 | LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 174 passing (+13 env-gated conversation tests) |
+| Tests | `uv run pytest tests/` — 185 passing (+13 env-gated conversation tests) |
 | Python venv | `~/advisory/.venv` (uv-managed) |
 | Proxmox API | `<user>@pam!<token-name>` (least-privilege API role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
@@ -62,7 +62,7 @@ LXC 101: pve-sentinel (Debian 13, unprivileged)
 | 5 | Host + LXC CVE monitoring | ✅ complete |
 | 6 | OpenAI-compatible API → Open WebUI | deferred |
 | 7 | Guest VM scanning (QEMU agent) | deferred |
-| 8 | Community Scripts installer | deferred |
+| 8 | Community Scripts installer | ✅ staged (submission pending) |
 
 ## Security Guardrails
 
@@ -294,11 +294,12 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `src/framework_data/nist_csf_ai.yaml` | NIST CSF 2.0 + AI considerations | ✅ Complete |
 | `config.yaml.example` | Anonymized configuration template | ✅ Updated |
 | `docs/proxmox-acl.md` | Proxmox API token privilege/ACL setup guide | ✅ Complete |
+| `community-scripts/` | ProxmoxVED installer (ct/install/json) + submission checklist | ✅ Staged |
 | `systemd/cve-scanner.service` | Daily scan service (EnvironmentFile=.env) | ✅ Phase 5 |
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |
 | `systemd/cve-digest.timer` | Weekly digest timer (Mon 08:00 UTC) | ✅ Phase 5 |
-| `tests/` | 174 tests across 12 modules | ✅ Complete |
+| `tests/` | 185 tests across 12 modules | ✅ Complete |
 
 ## On-LXC File Locations
 

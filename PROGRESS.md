@@ -588,3 +588,35 @@ Available system context — reference data only. Do NOT re-list findings unless
 - ruff: 0 errors
 - mypy: 0 errors
 - bandit: 0 medium/high
+
+## 2026-09-06: Community Scripts Installer + Deployment
+
+### ProxmoxVED submission staged ✅
+
+**Research**
+- Confirmed Debian 14 (Forky) is still *testing* — current stable is Debian 13
+  (Trixie 13.6). Installer stays on Debian 13.
+- Captured ProxmoxVED `AGENTS.md` contribution rules: CT/install/json layout,
+  `build.func` engine boot, `setup_uv`, `msg_*` helpers, `$STD`, bare-metal only,
+  `app_vars` export + JSON declaration, `motd_ssh`/`customize`/`cleanup_lxc`.
+
+**Files added (`community-scripts/`)**
+- `ct/pve-sentinel.sh` — Debian 13 unprivileged LXC (2C/2GB/8GB), exported
+  app_vars, fail-fast for unattended-required values, git-pull update_script.
+- `install/pve-sentinel-install.sh` — `setup_uv`, git clone to `/opt/pve-sentinel`,
+  generated `config.yaml` + `.env` (0600), root-level scanner/digest systemd
+  timers, `/usr/local/bin/pve-sentinel` CLI wrapper.
+- `json/pve-sentinel.json` — metadata, app_vars, notes.
+- `README.md` — local test + unattended commands and the submission checklist
+  with known deviations (no GitHub releases yet, missing selfhst logo, untested
+  arm64).
+
+**Deployment**
+- 6 commits pushed to `origin/main` (`2c81aaa..49c0309`).
+- Test command for the PVE host:
+  `bash -c "$(wget -qLO - https://raw.githubusercontent.com/distantgeek/pve-sentinel/main/community-scripts/ct/pve-sentinel.sh)"`
+
+**Results**
+- pytest: 185 passed (12 env-gated skipped)
+- ruff: 0 errors, mypy: 0 errors, bandit: 0 medium/high
+- Both installer scripts pass `bash -n`; JSON validates.

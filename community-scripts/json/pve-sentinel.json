@@ -1,0 +1,56 @@
+{
+  "name": "pve-sentinel",
+  "slug": "pve-sentinel",
+  "categories": [1],
+  "date_created": "2026-09-06",
+  "type": "ct",
+  "updateable": true,
+  "privileged": false,
+  "interface_port": null,
+  "documentation": "https://github.com/distantgeek/pve-sentinel",
+  "website": "https://github.com/distantgeek/pve-sentinel",
+  "repository": "https://github.com/distantgeek/pve-sentinel",
+  "logo": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/webp/pve-sentinel.webp",
+  "description": "pve-sentinel is an LLM-driven security advisory agent for Proxmox VE. It aggregates NVD, MITRE, and Proxmox PVE-SA advisories into a unified CVE feed, scans the Proxmox host and its LXC containers for vulnerable packages, and provides guardrail-constrained remediation guidance through an interactive CLI.",
+  "install_methods": [
+    {
+      "type": "default",
+      "script": "ct/pve-sentinel.sh",
+      "config_path": "/opt/pve-sentinel/config.yaml",
+      "resources": {
+        "cpu": 2,
+        "ram": 2048,
+        "hdd": 8,
+        "os": "Debian",
+        "version": "13"
+      }
+    }
+  ],
+  "app_vars": [
+    { "name": "var_proxmox_host", "label": "Proxmox Host", "type": "text", "required": true },
+    { "name": "var_proxmox_user", "label": "Proxmox API User", "type": "text", "default": "sentinel@pve" },
+    { "name": "var_proxmox_token_name", "label": "Proxmox API Token Name", "type": "text", "default": "sentinel" },
+    { "name": "var_proxmox_token_value", "label": "Proxmox API Token Value", "type": "password", "secret": true, "required": true },
+    { "name": "var_opencode_api_key", "label": "OpenCode API Key", "type": "password", "secret": true },
+    { "name": "var_nvd_api_key", "label": "NVD API Key", "type": "password", "secret": true },
+    { "name": "var_management_mode", "label": "Enable Management Mode", "type": "boolean", "default": "no" }
+  ],
+  "default_credentials": {
+    "username": null,
+    "password": null
+  },
+  "notes": [
+    {
+      "text": "Requires a Proxmox API token with least-privilege ACLs. See docs/proxmox-acl.md in the project repository for the exact role, privileges, and pveum commands.",
+      "type": "warning"
+    },
+    {
+      "text": "LLM advisory chat is unavailable until an OpenCode API key is provided (var_opencode_api_key). CVE scanning works without it.",
+      "type": "info"
+    },
+    {
+      "text": "verify_ssl is set to false for Proxmox VE's default self-signed CA. For production, install a standards-compliant certificate and set verify_ssl: true.",
+      "type": "warning"
+    }
+  ]
+}

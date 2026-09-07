@@ -213,6 +213,15 @@ Plus 13 conversation tests (env-gated) that verify LLM guardrail compliance:
 no hallucinated commands, no unsolicited tool suggestions, correct verification
 format, plan-before-execute behavior, and preset framing.
 
+## Community Scripts Installer
+
+A [Proxmox VE Helper-Scripts](https://community-scripts.org) installer is staged
+in [`community-scripts/`](community-scripts/README.md) — `ct/`, `install/`, and
+`json/` files ready to drop into a
+[`community-scripts/ProxmoxVED`](https://github.com/community-scripts/ProxmoxVED)
+fork for submission. It provisions a Debian 13 unprivileged LXC and installs
+pve-sentinel with daily scan + weekly digest systemd timers.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)

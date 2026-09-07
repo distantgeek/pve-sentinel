@@ -645,6 +645,65 @@ class TestScanCache:
         shell.console.print.assert_any_call("[cyan]Running fresh CVE scan...[/cyan]")
 
 
+# ── LLM Summary Sanitization Tests ─────────────────────────────────
+
+
+class TestSanitizeLlmSummary:
+    """Digest LLM summaries must never display tool-call artifacts."""
+
+    @pytest.fixture
+    def shell(self):
+        """Create a shell with mocked dependencies."""
+        mock_config = {
+            "model": {"provider": "opencode-go", "model_id": "glm-5.1"},
+            "proxmox": {},
+            "guardrails": {"enabled": True, "preset": "general"},
+            "storage": {"db_path": ":memory:", "scan_cache_ttl_hours": 24},
+            "permissions": {"allowed_write_actions": [], "deny_always": []},
+        }
+        with (
+            patch("cli.load_config", return_value=mock_config),
+            patch("cli.Database") as mock_db,
+            patch("cli.OpenCodeClient", side_effect=ValueError("No API key")),
+            patch("cli.ProxmoxTools", return_value=None),
+            patch("cli.PermissionGate"),
+        ):
+            from cli import SentinelShell
+
+            shell = SentinelShell()
+            shell.console = MagicMock()
+            shell.db = mock_db.return_value
+            yield shell
+
+    def test_strips_qwen_tool_call(self, shell):
+        """Qwen-style <|tool_call_start|> markers must be removed."""
+        text = (
+            "<|tool_call_start|>[proxmox_api(path='/nodes/pve/path')]<|tool_call_end|>"
+            "\n\nHere is the summary."
+        )
+        assert shell._sanitize_llm_summary(text) == "Here is the summary."
+
+    def test_strips_tool_marker(self, shell):
+        """[TOOL:...] markers must be removed."""
+        text = "[TOOL:proxmox_api] GET /nodes/pve/status\n\nSummary text"
+        assert shell._sanitize_llm_summary(text) == "Summary text"
+
+    def test_passes_through_plain_summary(self, shell):
+        """Normal summaries pass through unchanged."""
+        text = "No critical issues found. 42 CVEs tracked."
+        assert shell._sanitize_llm_summary(text) == text
+
+    def test_empty_input(self, shell):
+        """Empty input returns empty string."""
+        assert shell._sanitize_llm_summary("") == ""
+        assert shell._sanitize_llm_summary(None) == ""
+
+    def test_tool_call_only_returns_empty(self, shell):
+        """A response that is only a tool call sanitizes to empty."""
+        text = "<|tool_call_start|>[proxmox_api(path='/nodes/pve/path')]<|tool_call_end|>"
+        assert shell._sanitize_llm_summary(text) == ""
+
+
 # ── Conversation History Tests ─────────────────────────────────────
 
 

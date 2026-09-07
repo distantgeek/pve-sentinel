@@ -620,3 +620,50 @@ Available system context — reference data only. Do NOT re-list findings unless
 - pytest: 185 passed (12 env-gated skipped)
 - ruff: 0 errors, mypy: 0 errors, bandit: 0 medium/high
 - Both installer scripts pass `bash -n`; JSON validates.
+
+## 2026-09-07: LLM Provider Fallback
+
+### Config-driven fallback (`a197e1e`) ✅
+
+**Problem**
+- Primary provider (OpenCode Go, GLM-5.1) is pay-per-usage; when credits run out
+  the CLI fails hard (`CreditsError: Insufficient balance`).
+- Zen free models are session-gated (`x-opencode-session`) and rate-limited
+  per-key; GLM models on Zen are paid, not free.
+
+**Design**
+- `model.fallback` list in config.yaml, tried in order when the primary raises
+  (rate limit, auth, or server error). Any non-2xx (incl. 404 for a rotated-out
+  model) advances to the next entry.
+- Each entry: `provider`, `model_id`, optional `api_key_env` (defaults to primary
+  key), optional `api_base` (required for non-OpenCode providers).
+- Free fallback is **opt-in** — paying users leave it empty and use the primary
+  exclusively.
+- Recommended free option: OpenRouter `openrouter/free` meta-model, which
+  auto-routes to a currently-available free model, so OpenRouter's weekly
+  free-tier rotation never breaks the config.
+
+**Changes**
+- `src/opencode_client.py` — `ask()` fallback loop, `_build_fallback_client()`,
+  `_make_client()` refactor; corrected `opencode-zen` base URL to
+  `https://opencode.ai/zen/v1`.
+- `cli.py` — `_init_client` passes `model.fallback` from config.
+- `config.yaml.example` — documents fallback entries + OpenRouter example.
+- `tests/test_opencode_client.py` — 6 fallback tests incl. OpenRouter
+  `openrouter/free` (api_base + api_key_env + meta-model).
+
+**Results**
+- pytest: 196 passed, ruff/mypy/bandit clean (no new lint errors).
+- Live end-to-end verified on CT 100: primary fails (CreditsError) → OpenRouter
+  `openrouter/free` responds in ~1.4s.
+
+### Digest robustness fix (free-tier models)
+
+Free-tier fallback models sometimes emit native tool-call markers (e.g.
+Qwen-style `<|tool_call_start|>...</tool_call_end|>`) instead of a plain-text
+digest summary. Fixes:
+- `cli.py` — `_sanitize_llm_summary()` strips tool-call artifacts from digest
+  summaries; summary prompt now explicitly forbids tool calls; empty result
+  shows a generic "summary unavailable" note instead of raw garbage.
+- `tests/test_cli.py` — 5 sanitization tests (Qwen markers, `[TOOL:]` markers,
+  plain passthrough, empty input, tool-call-only).

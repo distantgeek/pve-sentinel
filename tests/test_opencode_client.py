@@ -252,6 +252,42 @@ class TestOpenCodeClientFallback:
             fb_client_kwargs = mock_client_cls.call_args_list[1].kwargs
             assert fb_client_kwargs["headers"]["Authorization"] == "Bearer k"
 
+    @patch("src.opencode_client.httpx.Client")
+    def test_fallback_openrouter_free(self, mock_client_cls):
+        """OpenRouter free fallback uses api_base + api_key_env + openrouter/free."""
+        primary = MagicMock()
+        primary.post.side_effect = self._http_error(429)
+        fallback = MagicMock()
+        fallback_response = MagicMock()
+        fallback_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        fallback_response.raise_for_status = MagicMock()
+        fallback.post.return_value = fallback_response
+        mock_client_cls.side_effect = [primary, fallback]
+
+        with patch.dict(
+            os.environ,
+            {"OPENCODE_GO_API_KEY": "k", "OPENROUTER_API_KEY": "or-key"},
+        ):
+            client = OpenCodeClient(
+                fallback=[
+                    {
+                        "provider": "openrouter",
+                        "model_id": "openrouter/free",
+                        "api_key_env": "OPENROUTER_API_KEY",
+                        "api_base": "https://openrouter.ai/api/v1",
+                    }
+                ]
+            )
+            assert client.ask("test") == "ok"
+
+        # Fallback client must use the OpenRouter base URL and key
+        fb_client_kwargs = mock_client_cls.call_args_list[1].kwargs
+        assert str(fb_client_kwargs["base_url"]).rstrip("/") == "https://openrouter.ai/api/v1"
+        assert fb_client_kwargs["headers"]["Authorization"] == "Bearer or-key"
+        # Model sent must be the meta-model
+        fb_call = fallback.post.call_args
+        assert fb_call[1]["json"]["model"] == "openrouter/free"
+
 
 class TestOpenCodeClientContextManager:
     @patch("src.opencode_client.httpx.Client")

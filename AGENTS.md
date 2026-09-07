@@ -10,10 +10,11 @@
 | LXC | 101, Debian 13, `<lxc-ip>`, 4C/8GB/32GB |
 | Proxmox host | `<hostname>`, `<host-ip>` |
 | SSH | `ssh -i ~/.ssh/id_ed25519_pve-sentinel <user>@<lxc-ip>` |
-| LLM | GLM-5.1 via OpenCode Go REST API (Zen: glm-4 free tier) |
+| LLM | GLM-5.1 via OpenCode Go REST API (paid; Zen: glm-4 free tier) |
 | API endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | API key env var | `OPENCODE_GO_API_KEY` (set in `.env` on LXC) |
-| Tests | `uv run pytest tests/` — 185 passing (+13 env-gated conversation tests) |
+| Fallback | Optional `model.fallback` list — e.g. OpenRouter `openrouter/free` meta-model (auto-routes to a current free model; never goes stale). Key: `OPENROUTER_API_KEY`. |
+| Tests | `uv run pytest tests/` — 196 passing (+13 env-gated conversation tests) |
 | Python venv | `~/advisory/.venv` (uv-managed) |
 | Proxmox API | `<user>@pam!<token-name>` (least-privilege API role) |
 | Proxmox token env | `PROXMOX_TOKEN_VALUE` (set in `.env` on LXC) |
@@ -189,6 +190,7 @@ Profile.d fallback: `/etc/profile.d/pve-sentinel.sh`.
 13. **Conversation history injection** — Last 10 messages (configurable) injected into each LLM prompt for multi-turn continuity. 500-char truncation per message to control token costs.
 14. **24-hour scan cache** — `/digest` uses cached results (CVE data + LLM summary) within 24h TTL. `/digest force` bypasses cache. Avoids redundant API calls and LLM token costs.
 15. **System context at end of prompt** — Cached repos/health/services placed after user message, labeled "reference data only" to prevent LLM from re-assessing everything on each turn.
+16. **Config-driven LLM fallback** — Optional `model.fallback` list tried in order when the primary fails (rate limit, auth, or server error). Free fallbacks are opt-in; paying users can leave it empty. Recommended free option: OpenRouter's `openrouter/free` meta-model, which auto-routes to a currently-available free model so weekly free-tier rotation never breaks the config. Any non-2xx (including 404 for a rotated-out model) triggers the next entry.
 
 ## Security Hardening (Phase 0)
 
@@ -212,6 +214,8 @@ Loaded automatically via `python-dotenv` from `.env` in the project directory:
 ```bash
 OPENCODE_GO_API_KEY=sk-...
 PROXMOX_TOKEN_VALUE=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# Optional — only needed if model.fallback references it (e.g. OpenRouter):
+OPENROUTER_API_KEY=sk-or-...
 ```
 
 No `.bashrc` or `.profile` sourcing needed — dotenv handles it at import time.

@@ -13,17 +13,32 @@ model:
 
   # Fallback providers tried automatically when the primary fails
   # (rate limit, auth error, or server error). Tried in order.
+  # OPTIONAL — if you pay for credits, you can leave this empty and the
+  # primary provider is used exclusively. Free fallbacks are for users who
+  # want a no-cost safety net when the paid tier is exhausted.
+  #
   # Each entry:
-  #   provider:    opencode-go | opencode-zen
-  #   model_id:    model to use (e.g. mimo-v2.5-free on the free tier)
+  #   provider:    opencode-go | opencode-zen | openrouter | any label
+  #   model_id:    model to use. For OpenRouter, `openrouter/free` is a
+  #                meta-model that auto-routes to an available free model,
+  #                so it never goes stale as OpenRouter rotates its free
+  #                tier weekly. (Free Zen models: big-pickle,
+  #                deepseek-v4-flash-free, mimo-v2.5-free, etc. NOTE: GLM
+  #                models on Zen are PAID, not free.)
   #   api_key_env: (optional) env var for a different key; defaults to
-  #                the primary key (OPENCODE_GO_API_KEY)
-  #   api_base:    (optional) override the provider's default base URL
-  fallback:
-    - provider: opencode-zen
-      model_id: mimo-v2.5-free
-  
-  # For non-OpenCode providers, uncomment:
+  #                the primary key (OPENCODE_GO_API_KEY). Free-tier quota
+  #                is per-key, so use a key with available quota.
+  #   api_base:    (optional) override the provider's default base URL.
+  #                Required for non-OpenCode providers (e.g. OpenRouter).
+  #
+  # Example — OpenRouter free fallback (set OPENROUTER_API_KEY in .env):
+  # fallback:
+  #   - provider: openrouter
+  #     model_id: openrouter/free
+  #     api_key_env: OPENROUTER_API_KEY
+  #     api_base: https://openrouter.ai/api/v1
+  #
+  # For other non-OpenCode providers, uncomment:
   # api_base: https://api.openai.com/v1
   # api_key_env: OPENAI_API_KEY
 

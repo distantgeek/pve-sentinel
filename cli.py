@@ -942,6 +942,19 @@ class SentinelShell:
                 )
             )
 
+    def _sanitize_llm_summary(self, text: str) -> str:
+        """Strip tool-call artifacts from an LLM summary response.
+
+        Free-tier fallback models sometimes emit native tool-call markers
+        (e.g. Qwen-style <|tool_call_start|>...</tool_call_end|>) instead of
+        a plain-text summary. Remove them so the digest never displays them.
+        """
+        if not text:
+            return ""
+        text = re.sub(r"<\|tool_call_start\|>.*?<\|tool_call_end\|>", "", text, flags=re.DOTALL)
+        text = re.sub(r"\[TOOL:\w+\][^\n]*", "", text)
+        return text.strip()
+
     def _run_fresh_digest(self) -> None:
         """Run a full CVE scan, cache results, and display LLM summary."""
         self.console.print("[cyan]Running fresh CVE scan...[/cyan]")
@@ -1074,15 +1087,20 @@ class SentinelShell:
                         f"Summarize these CVE scan results and provide prioritized recommendations:\n"
                         f"- {result['cves_found']} CVEs found\n"
                         f"- {result['packages_checked']} packages checked\n"
-                        f"- Duration: {result['duration']:.1f}s"
+                        f"- Duration: {result['duration']:.1f}s\n"
+                        f"Do NOT call any tools. Respond with a plain-text summary only."
                     )
                     if repo_context:
                         summary_prompt += f"\n\nSystem context:\n{repo_context}"
                     if health_context:
                         summary_prompt += f"\n{health_context}"
-                    llm_summary = self.client.ask(summary_prompt)
+                    llm_summary = self._sanitize_llm_summary(self.client.ask(summary_prompt))
                 if llm_summary:
                     self.console.print(Markdown(llm_summary))
+                else:
+                    self.console.print(
+                        "[dim]LLM summary unavailable (model returned a tool call instead of a summary).[/dim]"
+                    )
 
             # Cache full scan results (including LLM summary)
             cache_payload = {

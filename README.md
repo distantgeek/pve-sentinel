@@ -44,6 +44,8 @@ OPENCODE_GO_API_KEY=your-key-here
 PROXMOX_TOKEN_VALUE=your-uuid-secret-here
 # Optional: raises NVD API rate limit from 5 to 50 req/6s
 # NVD_API_KEY=your-nvd-key-here
+# Optional: only if you configure an OpenRouter free fallback
+# OPENROUTER_API_KEY=sk-or-...
 EOF
 
 # Verify connectivity
@@ -195,6 +197,28 @@ model:
   # Alternatives: openai, anthropic, google, ollama, or custom OpenAI-compatible API
 ```
 
+### Optional LLM Fallback
+
+If the primary provider is rate-limited, out of credits, or errors, an optional
+`model.fallback` list is tried in order. This is opt-in — paying users can leave
+it empty and use the primary exclusively. A no-cost safety net example using
+OpenRouter's `openrouter/free` meta-model (auto-routes to a currently-available
+free model, so OpenRouter's weekly free-tier rotation never breaks the config):
+
+```yaml
+model:
+  provider: opencode-go
+  model_id: glm-5.1
+  fallback:
+    - provider: openrouter
+      model_id: openrouter/free
+      api_key_env: OPENROUTER_API_KEY
+      api_base: https://openrouter.ai/api/v1
+```
+
+Set `OPENROUTER_API_KEY` in `.env`. Any non-2xx response (including a 404 for a
+rotated-out model) moves to the next fallback entry.
+
 ## Tests
 
 ```bash
@@ -205,7 +229,7 @@ uv run pytest tests/ -v
 PVE_SENTINEL_TEST_LLM=1 uv run pytest tests/test_conversation.py -v
 ```
 
-185 tests across 12 modules: cli, config, cve_scanner, database, db_maintenance,
+196 tests across 12 modules: cli, config, cve_scanner, database, db_maintenance,
 guardrails, opencode_client, permission_gate, proxmox_tools, scanner_cli, setup,
 snapshot.
 

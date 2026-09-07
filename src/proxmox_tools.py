@@ -78,7 +78,6 @@ class ProxmoxTools:
             token_name=token_name,
             token_value=token_value,
             verify_ssl=verify_ssl,
-            backend="httpx",
         )
 
     def __repr__(self) -> str:

@@ -23,7 +23,6 @@ class TestProxmoxToolsInit:
             token_name="token",
             token_value="secret",
             verify_ssl=True,
-            backend="httpx",
         )
 
     @patch("src.proxmox_tools.ProxmoxAPI")

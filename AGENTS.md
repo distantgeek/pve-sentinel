@@ -293,6 +293,7 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `src/scanner_cli.py` | systemd timer entry point, host package + local LXC scan | ✅ Phase 5 |
 | `src/framework_data/nist_csf_ai.yaml` | NIST CSF 2.0 + AI considerations | ✅ Complete |
 | `config.yaml.example` | Anonymized configuration template | ✅ Updated |
+| `docs/proxmox-acl.md` | Proxmox API token privilege/ACL setup guide | ✅ Complete |
 | `systemd/cve-scanner.service` | Daily scan service (EnvironmentFile=.env) | ✅ Phase 5 |
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |

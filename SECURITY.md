@@ -47,6 +47,9 @@
 | Never hardcode credentials | ✅ | `src/config.py:62-72` — env var resolution |
 | Validate credentials at startup | ✅ | `src/opencode_client.py:48-52`, `src/config.py:67-71` |
 
+Proxmox API token least-privilege ACL setup (role, privileges, paths, commands):
+see [`docs/proxmox-acl.md`](docs/proxmox-acl.md).
+
 ### 5. Session Management — ✅ Covered (with documented design choice)
 
 | Requirement | Status | Evidence |

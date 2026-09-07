@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
-# Engine comes from community-scripts/core; this repo only ships the scripts.
-# A local core checkout wins (COMMUNITY_SCRIPTS_CORE_DIR, else a sibling ../core),
-# so a fork or branch of core can be tested without editing this file.
-_cs_boot="${COMMUNITY_SCRIPTS_CORE_DIR:-$(dirname "${BASH_SOURCE[0]}")/../../core}/core/build.func"
-source "$_cs_boot" 2>/dev/null || source <(curl -fsSL "${COMMUNITY_SCRIPTS_CORE_URL:-https://raw.githubusercontent.com/community-scripts/core/main}/core/build.func")
-# Copyright (c) 2021-2026 community-scripts ORG
-# Author: Kevbot (distantgeek)
-# License: MIT | https://github.com/community-scripts/ProxmoxVED/raw/main/LICENSE
-# Source: https://github.com/distantgeek/pve-sentinel
+# pve-sentinel LXC installer (simplified standalone version)
+# Creates a Debian 13 LXC container and runs the install script inside it.
+# This version does NOT depend on the community-scripts engine — it uses
+# pct directly so it works from any repo without URL resolution tricks.
+#
+# Usage (on Proxmox host):
+#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/distantgeek/pve-sentinel/main/ct/pve-sentinel.sh)"
+#
+# Optional env vars:
+#   var_proxmox_host       Proxmox host IP/FQDN (required)
+#   var_proxmox_user       API user (default: sentinel@pve)
+#   var_proxmox_token_name API token name (default: sentinel)
+#   var_proxmox_token_value API token value UUID (required)
+#   var_opencode_api_key   OpenCode API key (optional)
+#   var_nvd_api_key        NVD API key (optional)
+#   var_management_mode    yes/no (default: no)
+#   CTID                   Container ID (default: auto)
+#   STORAGE                Storage for rootfs (default: local-lvm)
+#   TEMPLATE_STORAGE       Storage for template (default: local)
+
+set -euo pipefail
 
 APP="pve-sentinel"
-var_tags="${var_tags:-proxmox;security;cve}"
-var_cpu="${var_cpu:-2}"
-var_ram="${var_ram:-2048}"
-var_disk="${var_disk:-8}"
-var_os="${var_os:-debian}"
-var_version="${var_version:-13}"
-var_unprivileged="${var_unprivileged:-1}"
+CTID="${CTID:-}"
+STORAGE="${STORAGE:-local-lvm}"
+TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
+BRIDGE="${BRIDGE:-vmbr0}"
+CPU="${CPU:-2}"
+RAM="${RAM:-2048}"
+DISK="${DISK:-8}"
+OS="debian"
+VERSION="13"
+UNPRIVILEGED="${UNPRIVILEGED:-1}"
 
-# Application settings the install script accepts up front (see JSON app_vars).
-# Without the export they never reach the container.
+# Application settings passed to the install script
 export var_proxmox_host="${var_proxmox_host:-}"
 export var_proxmox_user="${var_proxmox_user:-sentinel@pve}"
 export var_proxmox_token_name="${var_proxmox_token_name:-sentinel}"
@@ -28,47 +42,89 @@ export var_opencode_api_key="${var_opencode_api_key:-}"
 export var_nvd_api_key="${var_nvd_api_key:-}"
 export var_management_mode="${var_management_mode:-no}"
 
-# Fail fast on values the install script cannot prompt for unattended.
-if [[ -n "${mode:-}" ]]; then
-  if [[ -z "${var_proxmox_host:-}" ]]; then
-    msg_error "var_proxmox_host is required for unattended installs."
-    exit 1
-  fi
-  if [[ -z "${var_proxmox_token_value:-}" ]]; then
-    msg_error "var_proxmox_token_value is required for unattended installs."
-    exit 1
-  fi
+# Fail fast on required values
+if [[ -z "${var_proxmox_host:-}" ]]; then
+  echo "ERROR: var_proxmox_host is required (Proxmox host IP/FQDN)"
+  echo "Usage: var_proxmox_host=192.168.1.10 var_proxmox_token_value=UUID bash -c \"\$(wget -qLO - <url>)\""
+  exit 1
+fi
+if [[ -z "${var_proxmox_token_value:-}" ]]; then
+  echo "ERROR: var_proxmox_token_value is required (Proxmox API token UUID)"
+  exit 1
 fi
 
-header_info "$APP"
-variables
-color
-catch_errors
+# Check we're on a Proxmox host
+if ! command -v pct >/dev/null 2>&1; then
+  echo "ERROR: This script must run on a Proxmox VE host (pct not found)"
+  exit 1
+fi
 
-function update_script() {
-  header_info
-  check_container_storage
-  check_container_resources
+# Pick a container ID
+if [[ -z "$CTID" ]]; then
+  CTID=$(pvesh get /cluster/nextid)
+fi
+echo "Using container ID: $CTID"
 
-  if [[ ! -d /opt/pve-sentinel ]]; then
-    msg_error "No ${APP} Installation Found!"
-    exit
+# Check template exists, download if needed
+TEMPLATE="${OS}-${VERSION}-standard_amd64.tar.zst"
+if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
+  echo "Downloading template $TEMPLATE..."
+  pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
+fi
+
+# Destroy existing container if present
+if pct status "$CTID" >/dev/null 2>&1; then
+  echo "Container $CTID already exists — destroying it"
+  pct stop "$CTID" 2>/dev/null || true
+  pct destroy "$CTID" 2>/dev/null || true
+fi
+
+# Create the container
+echo "Creating container $CTID..."
+pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
+  --hostname "$APP" \
+  --cores "$CPU" \
+  --memory "$RAM" \
+  --swap 512 \
+  --rootfs "$STORAGE:$DISK" \
+  --net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" \
+  --ostype "$OS" \
+  --unprivileged "$UNPRIVILEGED" \
+  --features "nesting=1,keyctl=1" \
+  --onboot 1 \
+  --tags "proxmox;security;cve"
+
+# Start the container
+echo "Starting container $CTID..."
+pct start "$CTID"
+
+# Wait for container to be ready
+echo "Waiting for container to boot..."
+for i in $(seq 1 30); do
+  if pct exec "$CTID" -- true 2>/dev/null; then
+    break
   fi
+  sleep 2
+done
 
-  msg_info "Updating ${APP}"
-  cd /opt/pve-sentinel
-  $STD git pull origin main
-  $STD uv sync
-  systemctl restart pve-sentinel-scanner
-  msg_ok "Updated ${APP}"
-  exit
-}
+# Fetch and run the install script inside the container
+echo "Running install script inside container..."
+INSTALL_URL="https://raw.githubusercontent.com/distantgeek/pve-sentinel/main/install/pve-sentinel-install.sh"
+pct exec "$CTID" -- bash -c "
+  export var_proxmox_host='${var_proxmox_host}'
+  export var_proxmox_user='${var_proxmox_user}'
+  export var_proxmox_token_name='${var_proxmox_token_name}'
+  export var_proxmox_token_value='${var_proxmox_token_value}'
+  export var_opencode_api_key='${var_opencode_api_key}'
+  export var_nvd_api_key='${var_nvd_api_key}'
+  export var_management_mode='${var_management_mode}'
+  bash <(wget -qLO - '${INSTALL_URL}')
+"
 
-start
-build_container
-description
-
-msg_ok "Completed Successfully!\n"
-echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
-echo -e "${INFO}${YW}Attach to the container and run the following to start the CLI:${CL}"
-echo -e "${TAB}${BGN}pve-sentinel${CL}"
+echo ""
+echo "=============================================="
+echo "pve-sentinel setup completed successfully!"
+echo "Container ID: $CTID"
+echo "Attach: pct enter $CTID"
+echo "Then run: pve-sentinel"
+echo "=============================================="

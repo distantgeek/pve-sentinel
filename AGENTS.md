@@ -294,7 +294,7 @@ cat /tmp/pve-sentinel-update.tar.gz | \
 | `src/framework_data/nist_csf_ai.yaml` | NIST CSF 2.0 + AI considerations | ✅ Complete |
 | `config.yaml.example` | Anonymized configuration template | ✅ Updated |
 | `docs/proxmox-acl.md` | Proxmox API token privilege/ACL setup guide | ✅ Complete |
-| `community-scripts/` | ProxmoxVED installer (ct/install/json) + submission checklist | ✅ Staged |
+| `ct/`, `install/`, `json/` | ProxmoxVED installer (ct/install/json) + submission checklist | ✅ Staged |
 | `systemd/cve-scanner.service` | Daily scan service (EnvironmentFile=.env) | ✅ Phase 5 |
 | `systemd/cve-scanner.timer` | Daily scan timer (00:06 UTC) | ✅ Phase 5 |
 | `systemd/cve-digest.service` | Weekly digest service | ✅ Phase 5 |

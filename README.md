@@ -215,12 +215,49 @@ format, plan-before-execute behavior, and preset framing.
 
 ## Community Scripts Installer
 
-A [Proxmox VE Helper-Scripts](https://community-scripts.org) installer is staged
-in [`community-scripts/`](community-scripts/README.md) — `ct/`, `install/`, and
-`json/` files ready to drop into a
+A [Proxmox VE Helper-Scripts](https://community-scripts.org) installer is
+staged at the repo root, mirroring the
 [`community-scripts/ProxmoxVED`](https://github.com/community-scripts/ProxmoxVED)
-fork for submission. It provisions a Debian 13 unprivileged LXC and installs
-pve-sentinel with daily scan + weekly digest systemd timers.
+layout for drop-in submission:
+
+| File | Purpose |
+|------|---------|
+| [`ct/pve-sentinel.sh`](ct/pve-sentinel.sh) | Creates a Debian 13 unprivileged LXC on the PVE host |
+| [`install/pve-sentinel-install.sh`](install/pve-sentinel-install.sh) | Runs inside the LXC: `setup_uv`, git clone, config, systemd timers |
+| [`json/pve-sentinel.json`](json/pve-sentinel.json) | Website metadata + unattended `app_vars` |
+
+**Test on a Proxmox host** (the engine needs the scripts base — our repo):
+
+```bash
+COMMUNITY_SCRIPTS_URL=https://raw.githubusercontent.com/distantgeek/pve-sentinel/main \
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/distantgeek/pve-sentinel/main/ct/pve-sentinel.sh)"
+```
+
+Unattended (values are exported and carried into the LXC):
+
+```bash
+bash ct/pve-sentinel.sh mode=unattended \
+  var_proxmox_host=192.168.x.x \
+  var_proxmox_user=sentinel@pve \
+  var_proxmox_token_name=sentinel \
+  var_proxmox_token_value=<uuid> \
+  var_opencode_api_key=<key>
+```
+
+### Submission checklist
+
+- [x] Bare-metal install (no Docker) — Python via `setup_uv`
+- [x] `$STD` before apt/git/uv commands, `msg_info`/`msg_ok` for custom code
+- [x] Required `app_vars` exported from CT script and declared in JSON
+- [x] Update function present (`git pull` + `uv sync` + restart)
+- [x] Footer `motd_ssh`, `customize`, `cleanup_lxc`
+- [x] `apt` (not `apt-get`); no core packages listed as deps
+- [x] JSON metadata with `install_methods`, `app_vars`, `notes`
+
+Known deviations to resolve before submitting a PR: cut a tagged GitHub release
+and switch the scripts to `fetch_and_deploy_gh_release`/`check_for_gh_release`;
+add a selfhst `pve-sentinel` logo; leave `architectures` unset until arm64 is
+verified.
 
 ## License
 

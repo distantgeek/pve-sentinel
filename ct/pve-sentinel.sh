@@ -33,13 +33,15 @@ OS="debian"
 VERSION="13"
 UNPRIVILEGED="${UNPRIVILEGED:-1}"
 
-# Application settings passed to the install script
-export var_proxmox_host="${var_proxmox_host:-}"
-export var_proxmox_user="${var_proxmox_user:-sentinel@pve}"
-export var_proxmox_token_name="${var_proxmox_token_name:-sentinel}"
-export var_proxmox_token_value="${var_proxmox_token_value:-}"
-export var_opencode_api_key="${var_opencode_api_key:-}"
-export var_nvd_api_key="${var_nvd_api_key:-}"
+# Application settings passed to the install script.
+# Accepts both var_proxmox_* and PROXMOX_* naming conventions so the
+# token file can be sourced directly (e.g. . /path/to/pve-sentinel.token).
+export var_proxmox_host="${var_proxmox_host:-${PROXMOX_HOST:-}}"
+export var_proxmox_user="${var_proxmox_user:-${PROXMOX_USER:-sentinel@pve}}"
+export var_proxmox_token_name="${var_proxmox_token_name:-${PROXMOX_TOKEN_NAME:-sentinel}}"
+export var_proxmox_token_value="${var_proxmox_token_value:-${PROXMOX_TOKEN_VALUE:-}}"
+export var_opencode_api_key="${var_opencode_api_key:-${OPENCODE_GO_API_KEY:-}}"
+export var_nvd_api_key="${var_nvd_api_key:-${NVD_API_KEY:-}}"
 export var_management_mode="${var_management_mode:-no}"
 
 # Fail fast on required values

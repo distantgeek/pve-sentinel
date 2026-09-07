@@ -108,16 +108,18 @@ pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
 echo "Starting container $CTID..."
 pct start "$CTID"
 
-# Wait for container to be ready
+# Wait for container to be ready AND have network (DHCP must assign an IP)
 echo "Waiting for container to boot..."
-for i in $(seq 1 30); do
-  if pct exec "$CTID" -- true 2>/dev/null; then
+for i in $(seq 1 60); do
+  if pct exec "$CTID" -- bash -c 'ip -4 addr show eth0 2>/dev/null | grep -q "inet " && getent hosts raw.githubusercontent.com >/dev/null 2>&1' 2>/dev/null; then
     break
   fi
   sleep 2
 done
 
-# Fetch and run the install script inside the container
+# Fetch and run the install script inside the container.
+# Download to a file and verify it is non-empty so a failed fetch cannot
+# silently run an empty script (bash <(wget ...) exits 0 on empty input).
 echo "Running install script inside container..."
 INSTALL_URL="https://raw.githubusercontent.com/distantgeek/pve-sentinel/main/install/pve-sentinel-install.sh"
 pct exec "$CTID" -- bash -c "
@@ -128,7 +130,9 @@ pct exec "$CTID" -- bash -c "
   export var_opencode_api_key='${var_opencode_api_key}'
   export var_nvd_api_key='${var_nvd_api_key}'
   export var_management_mode='${var_management_mode}'
-  bash <(wget -qLO - '${INSTALL_URL}')
+  wget -qO /tmp/pve-sentinel-install.sh '${INSTALL_URL}' || { echo 'ERROR: failed to download install script'; exit 1; }
+  test -s /tmp/pve-sentinel-install.sh || { echo 'ERROR: install script is empty'; exit 1; }
+  bash /tmp/pve-sentinel-install.sh
 "
 
 echo ""

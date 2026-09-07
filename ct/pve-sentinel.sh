@@ -67,12 +67,20 @@ if [[ -z "$CTID" ]]; then
 fi
 echo "Using container ID: $CTID"
 
-# Check template exists, download if needed
-TEMPLATE="${OS}-${VERSION}-standard_amd64.tar.zst"
-if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
-  echo "Downloading template $TEMPLATE..."
-  pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
+# Find or download the Debian template (filename includes patch version, e.g. 13.6-1)
+TEMPLATE_PATTERN="${OS}-${VERSION}-standard"
+TEMPLATE=$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep "$TEMPLATE_PATTERN" | awk '{print $1}' | sed 's|.*/||' | tail -1)
+if [[ -z "$TEMPLATE" ]]; then
+  echo "Downloading Debian $VERSION template..."
+  AVAIL=$(pveam available --section system 2>/dev/null | grep "$TEMPLATE_PATTERN" | tail -1 | awk '{print $2}')
+  if [[ -z "$AVAIL" ]]; then
+    echo "ERROR: No Debian $VERSION template available"
+    exit 1
+  fi
+  pveam download "$TEMPLATE_STORAGE" "$AVAIL"
+  TEMPLATE="$AVAIL"
 fi
+echo "Using template: $TEMPLATE"
 
 # Destroy existing container if present
 if pct status "$CTID" >/dev/null 2>&1; then

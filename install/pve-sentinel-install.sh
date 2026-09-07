@@ -153,6 +153,8 @@ systemctl enable -q --now pve-sentinel-digest.timer
 echo "==> Installing CLI wrapper"
 cat >/usr/local/bin/pve-sentinel <<'WRAP'
 #!/usr/bin/env bash
+cd /opt/pve-sentinel
+export SENTINEL_CONFIG=/opt/pve-sentinel/config.yaml
 exec /opt/pve-sentinel/.venv/bin/python -m cli "$@"
 WRAP
 chmod +x /usr/local/bin/pve-sentinel
